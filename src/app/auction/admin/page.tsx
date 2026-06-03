@@ -32,7 +32,7 @@ type PlayerListRow = {
 
 const REQUEST_TIMEOUT_MS = 12_000;
 
-async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+async function withTimeout<T>(promise: PromiseLike<T>, label: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {

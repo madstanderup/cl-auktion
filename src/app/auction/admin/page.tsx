@@ -1,0 +1,595 @@
+"use client";
+
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import { Copy, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
+
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import type { GameAdminSession } from "@/lib/player-storage";
+import {
+  GAME_ADMIN_SESSION_KEY,
+  PLAYER_GAME_ID_KEY,
+  PLAYER_ID_KEY,
+  PLAYER_NAME_KEY,
+} from "@/lib/player-storage";
+import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
+
+type AuctionState = {
+  current_team_name: string | null;
+  status: string;
+  current_phase: number | null;
+  tie_break_min_bid: number | null;
+};
+
+type PlayerListRow = {
+  id: string;
+  name: string;
+  coins: number;
+  created_at: string | null;
+};
+
+const REQUEST_TIMEOUT_MS = 12_000;
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${label} tog for lang tid. Prøv igen.`));
+    }, REQUEST_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function readAdminSession(): GameAdminSession | null {
+  try {
+    const raw = localStorage.getItem(GAME_ADMIN_SESSION_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    if (
+      typeof o.gameId === "string" &&
+      typeof o.adminSecret === "string" &&
+      typeof o.inviteCode === "string"
+    ) {
+      return {
+        gameId: o.gameId,
+        adminSecret: o.adminSecret,
+        inviteCode: o.inviteCode,
+        label: typeof o.label === "string" ? o.label : null,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeAdminSession(s: GameAdminSession) {
+  localStorage.setItem(GAME_ADMIN_SESSION_KEY, JSON.stringify(s));
+}
+
+export default function AuctionAdminPage() {
+  const [session, setSession] = useState<GameAdminSession | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [newGameLabel, setNewGameLabel] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [state, setState] = useState<AuctionState | null>(null);
+  const [players, setPlayers] = useState<PlayerListRow[]>([]);
+  const [playersLoading, setPlayersLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSession(readAdminSession());
+    setSessionReady(true);
+  }, []);
+
+  const loadState = useCallback(async (gameId: string) => {
+    try {
+      const { data, error } = await withTimeout(
+        supabase
+          .from("auction_state")
+          .select("current_team_name,status,current_phase,tie_break_min_bid,updated_at")
+          .eq("game_id", gameId)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        "Hentning af auktionsstatus",
+      );
+      if (error) {
+        setMessage(`Kunne ikke hente status: ${error.message}`);
+        setState(null);
+        return;
+      }
+      if (data) {
+        setState({
+          current_team_name: data.current_team_name as string | null,
+          status: String(data.status),
+          current_phase: Number(data.current_phase ?? 0),
+          tie_break_min_bid:
+            data.tie_break_min_bid == null ? null : Number(data.tie_break_min_bid),
+        });
+      } else {
+        setState(null);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Ukendt fejl.";
+      setMessage(`Kunne ikke hente status: ${message}`);
+      setState(null);
+    }
+  }, []);
+
+  const loadPlayers = useCallback(async (gameId: string) => {
+    setPlayersLoading(true);
+    try {
+      const { data, error } = await withTimeout(
+        supabase
+          .from("players")
+          .select("id,name,coins,created_at")
+          .eq("game_id", gameId)
+          .order("created_at", { ascending: false }),
+        "Hentning af spillere",
+      );
+      if (error) {
+        setMessage(`Kunne ikke hente spillere: ${error.message}`);
+        setPlayers([]);
+        return;
+      }
+      setPlayers(
+        (data ?? []).map((r) => ({
+          id: String(r.id),
+          name: String(r.name),
+          coins: Number(r.coins),
+          created_at: r.created_at != null ? String(r.created_at) : null,
+        })),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Ukendt fejl.";
+      setMessage(`Kunne ikke hente spillere: ${message}`);
+      setPlayers([]);
+    } finally {
+      setPlayersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sessionReady || !session) return;
+    void loadState(session.gameId);
+    void loadPlayers(session.gameId);
+  }, [session, sessionReady, loadState, loadPlayers]);
+
+  async function handleCreateGame() {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc("create_game", {
+          p_label: newGameLabel.trim() || null,
+        }),
+        "Oprettelse af spil",
+      );
+      if (error) {
+        setMessage(`Kunne ikke oprette spil: ${error.message}`);
+        return;
+      }
+      const payload = data as {
+        ok?: boolean;
+        error?: string;
+        game_id?: string;
+        invite_code?: string;
+        admin_secret?: string;
+        label?: string | null;
+      };
+      if (!payload?.ok || !payload.game_id || !payload.admin_secret || !payload.invite_code) {
+        setMessage(payload?.error ?? "Oprettelse fejlede.");
+        return;
+      }
+      const next: GameAdminSession = {
+        gameId: payload.game_id,
+        adminSecret: payload.admin_secret,
+        inviteCode: payload.invite_code,
+        label: payload.label ?? null,
+      };
+      writeAdminSession(next);
+      try {
+        localStorage.setItem(PLAYER_GAME_ID_KEY, next.gameId);
+      } catch {
+        /* ignore */
+      }
+      setSession(next);
+      setMessage(
+        `Nyt spil oprettet. Invitationskode: ${payload.invite_code} — del den med dine spillere.`,
+      );
+      void loadState(next.gameId);
+      void loadPlayers(next.gameId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Ukendt fejl.";
+      setMessage(`Kunne ikke oprette spil: ${message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleLeaveAdmin() {
+    localStorage.removeItem(GAME_ADMIN_SESSION_KEY);
+    try {
+      localStorage.removeItem(PLAYER_GAME_ID_KEY);
+      localStorage.removeItem(PLAYER_ID_KEY);
+      localStorage.removeItem(PLAYER_NAME_KEY);
+    } catch {
+      /* ignore */
+    }
+    setSession(null);
+    setState(null);
+    setPlayers([]);
+    setMessage("Du er logget ud som vært på denne browser.");
+  }
+
+  async function rpcArgs() {
+    const s = session;
+    if (!s) return null;
+    return { p_game_id: s.gameId, p_admin_secret: s.adminSecret };
+  }
+
+  async function handleDrawNextTeam() {
+    const args = await rpcArgs();
+    if (!args) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc("admin_draw_next_team", args),
+        "Træk af hold",
+      );
+      if (error) {
+        setMessage(`Fejl: ${error.message}`);
+        return;
+      }
+      const payload = data as { status?: string; team_name?: string; message?: string };
+      if (payload?.status === "bidding" && payload.team_name) {
+        setMessage(`Ny runde startet: ${payload.team_name}`);
+      } else {
+        setMessage(payload?.message ?? "Ingen hold tilbage.");
+      }
+      if (session) void loadState(session.gameId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Ukendt fejl.";
+      setMessage(`Fejl: ${message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleReveal() {
+    const args = await rpcArgs();
+    if (!args) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc("admin_reveal_and_find_winner", args),
+        "Afsløring af runde",
+      );
+      if (error) {
+        setMessage(`Fejl: ${error.message}`);
+        return;
+      }
+
+      const payload = data as {
+        ok?: boolean;
+        status?: string;
+        error?: string;
+        winner_name?: string;
+        winning_bid?: number;
+        tied_player_ids?: string[];
+        max_bid?: number;
+      };
+
+      if (!payload?.ok) {
+        setMessage(payload?.error ?? "Ukendt fejl under afsløring.");
+        return;
+      }
+
+      if (payload.status === "tie_breaker") {
+        setMessage(
+          `Uafgjort! Om-auktion startet mellem ${payload.tied_player_ids?.length ?? 0} spillere. Min bud: ${payload.max_bid ?? 0}`,
+        );
+      } else if (payload.status === "resolved") {
+        setMessage(
+          `Vinder: ${payload.winner_name ?? "ukendt"} for ${payload.winning_bid ?? 0} mønter.`,
+        );
+      } else {
+        setMessage(`Status: ${payload.status ?? "ukendt"}`);
+      }
+      if (session) void loadState(session.gameId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Ukendt fejl.";
+      setMessage(`Fejl: ${message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResetGame() {
+    const args = await rpcArgs();
+    if (!args) return;
+    const confirmed = window.confirm(
+      "Er du sikker på, at du vil nulstille DETTE spil (hold, bud og mønter for disse spillere)?",
+    );
+    if (!confirmed) return;
+
+    setLoading(true);
+    setMessage(null);
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc("admin_reset_game", args),
+        "Nulstilling af spil",
+      );
+      if (error) {
+        alert(`Kunne ikke nulstille spillet: ${error.message}`);
+        return;
+      }
+
+      const payload = data as {
+        ok?: boolean;
+        reset_teams?: number;
+        deleted_bids?: number;
+        reset_players?: number;
+        reset_state_rows?: number;
+        error?: string;
+      };
+      if (!payload?.ok) {
+        alert(payload?.error ?? "Nulstilling fejlede.");
+        return;
+      }
+
+      if (session) {
+        void loadState(session.gameId);
+        void loadPlayers(session.gameId);
+      }
+      setMessage(
+        `Spillet er nulstillet (hold frigivet: ${payload.reset_teams ?? 0}, bud slettet: ${payload.deleted_bids ?? 0}, spillere nulstillet: ${payload.reset_players ?? 0}).`,
+      );
+      alert("Spillet er nulstillet!");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Ukendt fejl.";
+      alert(`Kunne ikke nulstille spillet: ${message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDeletePlayer(row: PlayerListRow) {
+    if (!session) return;
+    const confirmed = window.confirm(
+      `Slet spilleren "${row.name}" fra dette spil? Deres bud slettes; ejede hold frigives.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(row.id);
+    setMessage(null);
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc("admin_delete_player", {
+          p_player_id: row.id,
+          p_game_id: session.gameId,
+          p_admin_secret: session.adminSecret,
+        }),
+        "Sletning af spiller",
+      );
+      if (error) {
+        setMessage(`Kunne ikke slette spiller: ${error.message}`);
+        return;
+      }
+      const payload = data as { ok?: boolean; error?: string; deleted_name?: string };
+      if (!payload?.ok) {
+        setMessage(payload?.error ?? "Sletning fejlede.");
+        return;
+      }
+      setMessage(`Spilleren "${payload.deleted_name ?? row.name}" er slettet.`);
+      void loadPlayers(session.gameId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Ukendt fejl.";
+      setMessage(`Kunne ikke slette spiller: ${message}`);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function copyInviteCode() {
+    if (!session) return;
+    void navigator.clipboard.writeText(session.inviteCode);
+    setMessage(`Kode kopieret: ${session.inviteCode}`);
+  }
+
+  if (!sessionReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-100">
+        <Loader2 className="size-8 animate-spin text-amber-400/80" aria-label="Indlæser" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-[#030711] px-4 py-10 text-slate-100">
+        <div className="mx-auto w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/40 backdrop-blur">
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="size-5 text-amber-300" />
+            <h1 className="text-xl font-semibold tracking-tight">Opret auktionsspil</h1>
+          </div>
+          <p className="mt-2 text-sm text-slate-400">
+            Du får en invitationskode du kan dele. Hvert spil har sin egen auktion og spillere.
+          </p>
+          <label htmlFor="game-label" className="mt-6 block text-xs font-medium text-slate-400">
+            Navn på spillet (valgfrit)
+          </label>
+          <Input
+            id="game-label"
+            value={newGameLabel}
+            onChange={(e) => setNewGameLabel(e.target.value)}
+            placeholder="Fx. Fredagshygge"
+            className="mt-2 h-11 border-white/15 bg-white/[0.06] text-white"
+          />
+          <Button
+            type="button"
+            className="mt-4 w-full gap-2"
+            disabled={loading}
+            onClick={() => void handleCreateGame()}
+          >
+            {loading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+            Opret nyt spil
+          </Button>
+          {message ? (
+            <p className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+              {message}
+            </p>
+          ) : null}
+          <Link href="/" className={cn(buttonVariants({ variant: "outline" }), "mt-6 inline-flex w-full justify-center")}>
+            Til forsiden
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#030711] px-4 py-10 text-slate-100">
+      <div className="mx-auto w-full max-w-2xl rounded-2xl border border-white/10 bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/40 backdrop-blur">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="size-5 text-amber-300" />
+            <h1 className="text-xl font-semibold tracking-tight">Auktion Admin</h1>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={() => handleLeaveAdmin()}>
+            Skift spil
+          </Button>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wider text-amber-200/80">
+            Invitationskode
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <code className="text-lg font-bold tracking-widest text-white">{session.inviteCode}</code>
+            <Button type="button" size="sm" variant="secondary" className="gap-1" onClick={() => copyInviteCode()}>
+              <Copy className="size-3.5" />
+              Kopiér
+            </Button>
+          </div>
+          {session.label ? (
+            <p className="mt-2 text-xs text-slate-400">Spil: {session.label}</p>
+          ) : null}
+        </div>
+
+        <p className="mt-3 text-sm text-slate-400">
+          Del koden med spillere — de indtaster den på forsiden sammen med deres navn.
+        </p>
+
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          <Button onClick={() => void handleDrawNextTeam()} disabled={loading}>
+            {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+            Træk næste hold
+          </Button>
+          <Button onClick={() => void handleReveal()} disabled={loading} variant="secondary">
+            {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+            Afslør og find vinder
+          </Button>
+        </div>
+
+        <Button
+          onClick={() => void handleResetGame()}
+          disabled={loading}
+          variant="destructive"
+          className="mt-3 w-full"
+        >
+          {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+          Nulstil dette spil
+        </Button>
+
+        <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4">
+          <h2 className="text-sm font-semibold text-white">Spillere i dette spil</h2>
+          {playersLoading ? (
+            <div className="mt-4 flex justify-center py-6">
+              <Loader2 className="size-6 animate-spin text-amber-400/80" aria-label="Indlæser spillere" />
+            </div>
+          ) : players.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-400">Ingen spillere endnu.</p>
+          ) : (
+            <ul className="mt-4 divide-y divide-white/10">
+              {players.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex flex-col gap-2 py-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div>
+                    <p className="font-medium text-white">{p.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {p.coins.toLocaleString("da-DK")} mønter
+                      {p.created_at ? (
+                        <>
+                          {" "}
+                          ·{" "}
+                          {new Date(p.created_at).toLocaleString("da-DK", {
+                            dateStyle: "short",
+                            timeStyle: "short",
+                          })}
+                        </>
+                      ) : null}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="shrink-0 gap-1"
+                    disabled={loading || deletingId !== null}
+                    onClick={() => void handleDeletePlayer(p)}
+                  >
+                    {deletingId === p.id ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" aria-hidden />
+                    )}
+                    Slet
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4 text-sm">
+          <p className="text-slate-400">
+            Status: <span className="text-white">{state?.status ?? "ukendt"}</span>
+          </p>
+          <p className="mt-1 text-slate-400">
+            Hold: <span className="text-white">{state?.current_team_name ?? "—"}</span>
+          </p>
+          <p className="mt-1 text-slate-400">
+            Fase: <span className="text-white">{state?.current_phase ?? 0}</span>
+          </p>
+          <p className="mt-1 text-slate-400">
+            Tie-break min bud:{" "}
+            <span className="text-white">{state?.tie_break_min_bid ?? "—"}</span>
+          </p>
+        </div>
+
+        {message ? (
+          <p className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+            {message}
+          </p>
+        ) : null}
+
+        <Link href="/auction" className={cn(buttonVariants({ variant: "outline" }), "mt-6 inline-flex w-full justify-center")}>
+          Til spiller-visning (samme spil som denne browser er vært for)
+        </Link>
+      </div>
+    </div>
+  );
+}

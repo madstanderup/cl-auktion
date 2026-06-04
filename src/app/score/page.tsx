@@ -150,6 +150,18 @@ export default function ScorePage() {
           if (playerId) void load(gameId, playerId);
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "wc_matches",
+          filter: `game_id=eq.${gameId}`,
+        },
+        () => {
+          if (playerId) void load(gameId, playerId);
+        },
+      )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
@@ -241,7 +253,7 @@ export default function ScorePage() {
             <section className="mt-8">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Rangliste</h2>
               <p className="mt-1 text-xs text-slate-500">
-                Opdateres live når værten registrerer resultater og tildeler point i databasen.
+                Opdateres live når værten registrerer kampresultater. Point beregnes automatisk ud fra dine holds præstationer.
               </p>
               <ul className="mt-4 divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-950/50">
                 {board.map((row, idx) => (

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Copy, Loader2, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import { Copy, Loader2, Plus, ShieldCheck, Trash2, Trophy } from "lucide-react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,33 @@ type PlayerListRow = {
   name: string;
   coins: number;
   created_at: string | null;
+};
+
+type MatchRow = {
+  id: string;
+  home_team: string;
+  away_team: string;
+  stage: string;
+  home_score: number | null;
+  away_score: number | null;
+  result_type: string | null;
+  status: string;
+  match_date: string | null;
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  group:         "Gruppespil",
+  round_of_32:   "1/16-finale",
+  round_of_16:   "1/8-finale",
+  quarter_final: "Kvartfinale",
+  semi_final:    "Semifinale",
+  final:         "Finale",
+};
+
+const RESULT_TYPE_LABELS: Record<string, string> = {
+  normal_time: "Ordinær tid",
+  extra_time:  "Forlænget tid",
+  penalties:   "Straffespark",
 };
 
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -83,6 +110,18 @@ export default function AuctionAdminPage() {
   const [players, setPlayers] = useState<PlayerListRow[]>([]);
   const [playersLoading, setPlayersLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Kampresultater
+  const [matches, setMatches] = useState<MatchRow[]>([]);
+  const [matchesLoading, setMatchesLoading] = useState(false);
+  const [teamNames, setTeamNames] = useState<string[]>([]);
+  const [newMatchHome, setNewMatchHome] = useState("");
+  const [newMatchAway, setNewMatchAway] = useState("");
+  const [newMatchStage, setNewMatchStage] = useState("group");
+  const [matchAddLoading, setMatchAddLoading] = useState(false);
+  // Per-kamp resultat-form state: matchId → {homeScore, awayScore, resultType}
+  const [resultForms, setResultForms] = useState<Record<string, { home: string; away: string; type: string }>>({});
+  const [resultLoading, setResultLoading] = useState<string | null>(null);
 
   useEffect(() => {
     setSession(readAdminSession());
@@ -157,11 +196,59 @@ export default function AuctionAdminPage() {
     }
   }, []);
 
+  const loadMatches = useCallback(async (gameId: string) => {
+    setMatchesLoading(true);
+    try {
+      const { data, error } = await withTimeout(
+        supabase
+          .from("wc_matches")
+          .select("id,home_team,away_team,stage,home_score,away_score,result_type,status,match_date")
+          .eq("game_id", gameId)
+          .order("created_at", { ascending: true }),
+        "Hentning af kampe",
+      );
+      if (error) { setMessage(`Kunne ikke hente kampe: ${error.message}`); return; }
+      setMatches(
+        (data ?? []).map((r) => ({
+          id: String(r.id),
+          home_team: String(r.home_team),
+          away_team: String(r.away_team),
+          stage: String(r.stage),
+          home_score: r.home_score != null ? Number(r.home_score) : null,
+          away_score: r.away_score != null ? Number(r.away_score) : null,
+          result_type: r.result_type != null ? String(r.result_type) : null,
+          status: String(r.status),
+          match_date: r.match_date != null ? String(r.match_date) : null,
+        })),
+      );
+    } catch (err) {
+      setMessage(`Fejl ved hentning af kampe: ${err instanceof Error ? err.message : "ukendt"}`);
+    } finally {
+      setMatchesLoading(false);
+    }
+  }, []);
+
+  const loadTeamNames = useCallback(async (gameId: string) => {
+    const { data } = await supabase
+      .from("game_teams")
+      .select("teams(name)")
+      .eq("game_id", gameId)
+      .not("owner_player_id", "is", null);
+    const names: string[] = [];
+    for (const row of data ?? []) {
+      const r = row as { teams?: { name?: string } | null };
+      if (r.teams?.name) names.push(String(r.teams.name));
+    }
+    setTeamNames(names.sort((a, b) => a.localeCompare(b, "da")));
+  }, []);
+
   useEffect(() => {
     if (!sessionReady || !session) return;
     void loadState(session.gameId);
     void loadPlayers(session.gameId);
-  }, [session, sessionReady, loadState, loadPlayers]);
+    void loadMatches(session.gameId);
+    void loadTeamNames(session.gameId);
+  }, [session, sessionReady, loadState, loadPlayers, loadMatches, loadTeamNames]);
 
   async function handleCreateGame() {
     setLoading(true);
@@ -407,6 +494,94 @@ export default function AuctionAdminPage() {
     setMessage(`Kode kopieret: ${session.inviteCode}`);
   }
 
+  async function handleAddMatch() {
+    if (!session || !newMatchHome || !newMatchAway) return;
+    if (newMatchHome === newMatchAway) { setMessage("Hjemme- og udehold må ikke være det samme."); return; }
+    setMatchAddLoading(true);
+    setMessage(null);
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc("admin_add_match", {
+          p_game_id:      session.gameId,
+          p_admin_secret: session.adminSecret,
+          p_home_team:    newMatchHome,
+          p_away_team:    newMatchAway,
+          p_stage:        newMatchStage,
+        }),
+        "Tilføjelse af kamp",
+      );
+      if (error) { setMessage(`Fejl: ${error.message}`); return; }
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) { setMessage(payload?.error ?? "Fejl ved tilføjelse."); return; }
+      setNewMatchHome("");
+      setNewMatchAway("");
+      void loadMatches(session.gameId);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Ukendt fejl.");
+    } finally {
+      setMatchAddLoading(false);
+    }
+  }
+
+  async function handleSetResult(matchId: string) {
+    if (!session) return;
+    const form = resultForms[matchId];
+    if (!form) return;
+    const homeScore = parseInt(form.home, 10);
+    const awayScore = parseInt(form.away, 10);
+    if (isNaN(homeScore) || isNaN(awayScore) || homeScore < 0 || awayScore < 0) {
+      setMessage("Ugyldigt resultat — angiv hele tal ≥ 0."); return;
+    }
+    setResultLoading(matchId);
+    setMessage(null);
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc("admin_set_match_result", {
+          p_game_id:      session.gameId,
+          p_admin_secret: session.adminSecret,
+          p_match_id:     matchId,
+          p_home_score:   homeScore,
+          p_away_score:   awayScore,
+          p_result_type:  form.type,
+        }),
+        "Registrering af resultat",
+      );
+      if (error) { setMessage(`Fejl: ${error.message}`); return; }
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) { setMessage(payload?.error ?? "Fejl."); return; }
+      setMessage("Resultat gemt — point genberegnet.");
+      void loadMatches(session.gameId);
+      void loadPlayers(session.gameId);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Ukendt fejl.");
+    } finally {
+      setResultLoading(null);
+    }
+  }
+
+  async function handleDeleteMatch(matchId: string) {
+    if (!session) return;
+    if (!window.confirm("Slet denne kamp? Point genberegnes.")) return;
+    setMessage(null);
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc("admin_delete_match", {
+          p_game_id:      session.gameId,
+          p_admin_secret: session.adminSecret,
+          p_match_id:     matchId,
+        }),
+        "Sletning af kamp",
+      );
+      if (error) { setMessage(`Fejl: ${error.message}`); return; }
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) { setMessage(payload?.error ?? "Fejl."); return; }
+      void loadMatches(session.gameId);
+      void loadPlayers(session.gameId);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Ukendt fejl.");
+    }
+  }
+
   if (!sessionReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-100">
@@ -589,6 +764,178 @@ export default function AuctionAdminPage() {
         <Link href="/auction" className={cn(buttonVariants({ variant: "outline" }), "mt-6 inline-flex w-full justify-center")}>
           Til spiller-visning (samme spil som denne browser er vært for)
         </Link>
+
+        {/* ── Kampresultater ─────────────────────────────────────────── */}
+        <div className="mt-8 rounded-xl border border-white/10 bg-black/30 p-4">
+          <div className="flex items-center gap-2">
+            <Trophy className="size-4 text-amber-300" aria-hidden />
+            <h2 className="text-sm font-semibold text-white">Kampresultater</h2>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Tilføj kampe manuelt og registrér resultater. Point genberegnes automatisk.
+          </p>
+
+          {/* Tilføj ny kamp */}
+          <div className="mt-4 space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-3">
+            <p className="text-xs font-medium text-slate-400">Tilføj kamp</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-slate-500">Hjemmehold</label>
+                {teamNames.length > 0 ? (
+                  <select
+                    value={newMatchHome}
+                    onChange={(e) => setNewMatchHome(e.target.value)}
+                    className="mt-1 w-full rounded-md border border-white/15 bg-white/[0.06] px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  >
+                    <option value="">Vælg hold</option>
+                    {teamNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                ) : (
+                  <Input
+                    value={newMatchHome}
+                    onChange={(e) => setNewMatchHome(e.target.value)}
+                    placeholder="Holdnavn"
+                    className="mt-1 h-9 border-white/15 bg-white/[0.06] text-white text-sm"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Udehold</label>
+                {teamNames.length > 0 ? (
+                  <select
+                    value={newMatchAway}
+                    onChange={(e) => setNewMatchAway(e.target.value)}
+                    className="mt-1 w-full rounded-md border border-white/15 bg-white/[0.06] px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-amber-400"
+                  >
+                    <option value="">Vælg hold</option>
+                    {teamNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                ) : (
+                  <Input
+                    value={newMatchAway}
+                    onChange={(e) => setNewMatchAway(e.target.value)}
+                    placeholder="Holdnavn"
+                    className="mt-1 h-9 border-white/15 bg-white/[0.06] text-white text-sm"
+                  />
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">Fase</label>
+              <select
+                value={newMatchStage}
+                onChange={(e) => setNewMatchStage(e.target.value)}
+                className="mt-1 w-full rounded-md border border-white/15 bg-white/[0.06] px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-amber-400"
+              >
+                {Object.entries(STAGE_LABELS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="w-full gap-1"
+              disabled={matchAddLoading || !newMatchHome || !newMatchAway}
+              onClick={() => void handleAddMatch()}
+            >
+              {matchAddLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+              Tilføj kamp
+            </Button>
+          </div>
+
+          {/* Kampiste med resultat-forms */}
+          <div className="mt-4 space-y-2">
+            {matchesLoading ? (
+              <div className="flex justify-center py-4">
+                <Loader2 className="size-5 animate-spin text-amber-400/80" />
+              </div>
+            ) : matches.length === 0 ? (
+              <p className="py-2 text-xs text-slate-500">Ingen kampe tilføjet endnu.</p>
+            ) : (
+              matches.map((m) => {
+                const form = resultForms[m.id] ?? { home: "", away: "", type: m.stage === "group" ? "normal_time" : "normal_time" };
+                const isFinished = m.status === "finished";
+                const isKnockout = m.stage !== "group";
+                return (
+                  <div key={m.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          {m.home_team} <span className="text-slate-500">vs</span> {m.away_team}
+                        </p>
+                        <p className="text-xs text-slate-500">{STAGE_LABELS[m.stage] ?? m.stage}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isFinished && (
+                          <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-300">
+                            {m.home_score}–{m.away_score}
+                            {m.result_type && m.result_type !== "normal_time"
+                              ? ` (${RESULT_TYPE_LABELS[m.result_type]})`
+                              : ""}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteMatch(m.id)}
+                          className="text-slate-600 hover:text-red-400"
+                          aria-label="Slet kamp"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {!isFinished && (
+                      <div className="mt-2 flex flex-wrap items-end gap-2">
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            min={0}
+                            placeholder="0"
+                            value={form.home}
+                            onChange={(e) => setResultForms((prev) => ({ ...prev, [m.id]: { ...form, home: e.target.value } }))}
+                            className="h-8 w-14 border-white/15 bg-white/[0.06] text-center text-sm text-white"
+                          />
+                          <span className="text-slate-500">–</span>
+                          <Input
+                            type="number"
+                            min={0}
+                            placeholder="0"
+                            value={form.away}
+                            onChange={(e) => setResultForms((prev) => ({ ...prev, [m.id]: { ...form, away: e.target.value } }))}
+                            className="h-8 w-14 border-white/15 bg-white/[0.06] text-center text-sm text-white"
+                          />
+                        </div>
+                        {isKnockout && (
+                          <select
+                            value={form.type}
+                            onChange={(e) => setResultForms((prev) => ({ ...prev, [m.id]: { ...form, type: e.target.value } }))}
+                            className="h-8 rounded-md border border-white/15 bg-white/[0.06] px-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-400"
+                          >
+                            <option value="normal_time">Ordinær tid</option>
+                            <option value="extra_time">Forlænget tid</option>
+                            <option value="penalties">Straffespark</option>
+                          </select>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={resultLoading === m.id || !form.home || !form.away}
+                          onClick={() => void handleSetResult(m.id)}
+                          className="h-8 text-xs"
+                        >
+                          {resultLoading === m.id ? <Loader2 className="size-3 animate-spin" /> : "Gem"}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+        {/* ── Slut kampresultater ─────────────────────────────────────── */}
       </div>
     </div>
   );

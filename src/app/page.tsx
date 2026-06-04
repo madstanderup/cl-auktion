@@ -91,19 +91,28 @@ export default function Home() {
 
       const gameId = String(gameRow.id);
 
-      const { data, error } = await supabase
+      // Tjek om spilleren allerede eksisterer (genindtræden efter refresh/tab-luk)
+      const { data: existing } = await supabase
         .from("players")
-        .insert([{ name: spillerNavn, coins: 1000, points: 0, game_id: gameId }])
         .select("id")
-        .single();
+        .eq("game_id", gameId)
+        .eq("name", spillerNavn)
+        .maybeSingle();
 
-      if (error) {
-        alert(error.message);
-        return;
-      }
+      const playerId = existing?.id
+        ? String(existing.id)
+        : await (async () => {
+            const { data, error } = await supabase
+              .from("players")
+              .insert([{ name: spillerNavn, coins: 1000, points: 0, game_id: gameId }])
+              .select("id")
+              .single();
+            if (error) throw error;
+            return String(data.id);
+          })();
 
       try {
-        if (data?.id) localStorage.setItem(PLAYER_ID_KEY, data.id);
+        localStorage.setItem(PLAYER_ID_KEY, playerId);
         localStorage.setItem(PLAYER_NAME_KEY, spillerNavn);
         localStorage.setItem(PLAYER_GAME_ID_KEY, gameId);
       } catch {

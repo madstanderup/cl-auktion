@@ -65,8 +65,11 @@ export default function AuctionPage() {
   });
   const [ownershipSummary, setOwnershipSummary] = useState<PlayerOwnershipSummary[]>([]);
   const [victoryTick, setVictoryTick] = useState(0);
+  const [revealedBids, setRevealedBids] = useState<{ playerName: string; amount: number }[]>([]);
 
   const prevRoundRef = useRef<{ round: string | null; phase: number } | null>(null);
+  // Gemmer sidste aktive runde så vi kan hente bud selv efter round_id nulstilles
+  const lastRoundRef = useRef<{ round: string; phase: number } | null>(null);
 
   useEffect(() => {
     try {
@@ -391,6 +394,10 @@ export default function AuctionPage() {
       setBidSuccessMsg(null);
       setBidAmount("");
     }
+    // Gem aktiv runde så vi kan hente bud efter den nulstilles
+    if (auction.current_round_id) {
+      lastRoundRef.current = { round: auction.current_round_id, phase: auction.current_phase };
+    }
     prevRoundRef.current = { round: auction.current_round_id, phase: auction.current_phase };
   }, [auction]);
 
@@ -433,6 +440,48 @@ export default function AuctionPage() {
     const id = window.setInterval(() => setVictoryTick((x) => x + 1), 250);
     return () => window.clearInterval(id);
   }, [auction?.resolution_until, auction?.resolution_winner_name]);
+
+  // Hent alle bud når vinder-banneret vises
+  useEffect(() => {
+    if (!victoryBannerActive || !gameId) return;
+    const roundInfo = lastRoundRef.current;
+    if (!roundInfo) return;
+    let cancelled = false;
+    (async () => {
+      const { data: bidsData } = await supabase
+        .from("auction_room_bids")
+        .select("player_id, amount")
+        .eq("game_id", gameId)
+        .eq("round_id", roundInfo.round)
+        .eq("bid_phase", roundInfo.phase)
+        .order("amount", { ascending: false });
+
+      if (!bidsData?.length || cancelled) return;
+
+      const playerIds = [...new Set(bidsData.map((b) => String(b.player_id)))];
+      const { data: playersData } = await supabase
+        .from("players")
+        .select("id,name")
+        .in("id", playerIds);
+
+      if (cancelled) return;
+      const nameById = new Map((playersData ?? []).map((p) => [String(p.id), String(p.name)]));
+
+      // Seneste bud pr. spiller (højest ved flere bud fra samme)
+      const latestByPlayer = new Map<string, number>();
+      for (const b of bidsData) {
+        const pid = String(b.player_id);
+        if (!latestByPlayer.has(pid)) latestByPlayer.set(pid, Number(b.amount));
+      }
+
+      setRevealedBids(
+        [...latestByPlayer.entries()]
+          .map(([pid, amount]) => ({ playerName: nameById.get(pid) ?? "?", amount }))
+          .sort((a, b) => b.amount - a.amount),
+      );
+    })();
+    return () => { cancelled = true; };
+  }, [victoryBannerActive, gameId]);
 
   const victorySecondsLeft = useMemo(() => {
     if (!auction?.resolution_until) return 0;
@@ -597,6 +646,26 @@ export default function AuctionPage() {
                 {(auction.resolution_winning_bid ?? 0).toLocaleString("da-DK")} mønter
               </span>
             </p>
+
+            {revealedBids.length > 0 && (
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-left">
+                <p className="mb-2 text-[0.65rem] font-semibold uppercase tracking-widest text-slate-500">Alle bud</p>
+                <ul className="space-y-1">
+                  {revealedBids.map((b) => (
+                    <li key={b.playerName} className="flex items-center justify-between text-sm">
+                      <span className={cn(
+                        "font-medium",
+                        b.playerName === auction.resolution_winner_name ? "text-amber-200" : "text-slate-300"
+                      )}>
+                        {b.playerName === auction.resolution_winner_name ? "👑 " : ""}{b.playerName}
+                      </span>
+                      <span className="tabular-nums text-slate-200">{b.amount.toLocaleString("da-DK")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <p className="mt-3 text-xs text-slate-400">
               Vises i <span className="tabular-nums font-medium text-amber-200/90">{victorySecondsLeft}</span> sek.
               endnu
@@ -778,7 +847,12 @@ export default function AuctionPage() {
                 {canBid ? (
                   <div className="mt-8 space-y-4 text-left">
                     <label htmlFor="bid-amount" className="block text-xs font-medium text-slate-400">
-                      Dit bud (mønter){status === "tie_breaker" ? ` - min ${minBid}` : ""}
+                      Dit bud (mønter){status === "tie_breaker" ? ` — min ${minBid}` : ""}
+                      {player ? (
+                        <span className="ml-2 text-slate-500">
+                          (du har {player.coins.toLocaleString("da-DK")})
+                        </span>
+                      ) : null}
                     </label>
                     <Input
                       id="bid-amount"
@@ -793,8 +867,15 @@ export default function AuctionPage() {
                       className={cn(
                         "h-11 border-white/15 bg-white/[0.06] text-base text-white",
                         "placeholder:text-slate-500 focus-visible:border-amber-400/50 focus-visible:ring-amber-400/25",
+                        player && bidAmount && Number(bidAmount) > player.coins &&
+                          "border-red-400/60 focus-visible:border-red-400/70 focus-visible:ring-red-400/25",
                       )}
                     />
+                    {player && bidAmount && Number(bidAmount) > player.coins ? (
+                      <p className="text-xs text-red-300/90">
+                        Du har ikke nok mønter — maks {player.coins.toLocaleString("da-DK")}.
+                      </p>
+                    ) : null}
                     <Button
                       type="button"
                       className={cn(
@@ -802,7 +883,13 @@ export default function AuctionPage() {
                         "border border-amber-400/30 bg-gradient-to-r from-amber-300 via-amber-200 to-amber-300 text-slate-950",
                         "hover:from-amber-200 hover:via-amber-100 hover:to-amber-200",
                       )}
-                      disabled={bidSubmitting || !player}
+                      disabled={
+                        bidSubmitting ||
+                        !player ||
+                        !bidAmount ||
+                        Number(bidAmount) < minBid ||
+                        Number(bidAmount) > (player?.coins ?? 0)
+                      }
                       onClick={() => void handleSubmitBid()}
                     >
                       {bidSubmitting ? (

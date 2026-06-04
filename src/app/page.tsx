@@ -145,10 +145,22 @@ export default function Home() {
         ))}
       </div>
 
+      {/*
+        ── CHAMPIONS LEAGUE-REGLER (gem til næste CL-sæson) ──────────────────
+        Header:   Sæson 25/26 · Champions League · Auktion 25/26
+        Tagline:  Real-time auktion mellem 2–8 spillere. Byd løst, byg din trup
+                  og scorer gennem turneringen.
+        Kamp-point:
+          Sejr (90 min): 150  · Sejr forl./str.: 50  · Uafgjort: 50  · Nederlag: 0
+        Avancement:
+          1/8: 100  · KV: 200  · SF: 400  · Finale: 600  · Vinder: 800
+        ──────────────────────────────────────────────────────────────────────
+      */}
+
       <header className="relative z-10 flex items-center justify-center gap-2 pt-10 pb-4">
         <Sparkles className="size-5 text-amber-300/90" strokeWidth={1.75} />
         <span className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">
-          Sæson 25/26
+          VM 2026
         </span>
         <Sparkles className="size-5 text-amber-300/90" strokeWidth={1.75} />
       </header>
@@ -156,16 +168,16 @@ export default function Home() {
       <main className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-16 pt-2 sm:max-w-xl sm:px-8">
         <h1 className="text-center font-semibold tracking-tight text-balance">
           <span className="block bg-gradient-to-br from-white via-slate-100 to-slate-400 bg-clip-text text-3xl leading-tight text-transparent sm:text-4xl md:text-5xl">
-            Champions League
+            Verdensmesterskabet
           </span>
           <span className="mt-1 block bg-gradient-to-r from-amber-200 via-amber-100 to-amber-300 bg-clip-text text-2xl text-transparent sm:text-3xl md:text-4xl">
-            Auktion 25/26
+            Auktion 2026
           </span>
         </h1>
 
         <p className="mx-auto mt-5 max-w-md text-center text-sm leading-relaxed text-slate-400">
-          Real-time auktion mellem 2–8 spillere. Byd løst, byg din trup og scorer gennem
-          turneringen.
+          Real-time auktion mellem 2–8 spillere. Byd på VM-hold, byg din trup og følg
+          pointene gennem hele turneringen.
         </p>
 
         <section
@@ -201,23 +213,29 @@ export default function Home() {
               Kamp-point
             </p>
             <p className="mt-2 text-xs text-slate-400">
-              Sejr (90 min): <strong className="text-slate-200">150</strong>
+              Sejr (ordinær tid): <strong className="text-slate-200">150</strong>
               {" · "}
-              Sejr efter forl. / str.: <strong className="text-slate-200">50</strong>
+              Sejr (forl. / str.): <strong className="text-slate-200">50</strong>
               {" · "}
               Uafgjort: <strong className="text-slate-200">50</strong>
               {" · "}
               Nederlag: <strong className="text-slate-200">0</strong>
             </p>
             <p className="mt-3 text-[0.7rem] font-semibold uppercase tracking-widest text-slate-500">
-              Avancement
+              Avancement-bonusser
             </p>
             <p className="mt-2 text-xs leading-relaxed text-slate-400">
-              1/8: <strong className="text-slate-200">100</strong>
-              {" · "}KV: <strong className="text-slate-200">200</strong>
-              {" · "}SF: <strong className="text-slate-200">400</strong>
-              {" · "}Finale: <strong className="text-slate-200">600</strong>
-              {" · "}Vinder: <strong className="text-amber-200/90">800</strong>
+              1/16-finale: <strong className="text-slate-200">100</strong>
+              {" · "}
+              1/8-finale: <strong className="text-slate-200">200</strong>
+              {" · "}
+              Kvartfinale: <strong className="text-slate-200">400</strong>
+              {" · "}
+              Semifinale: <strong className="text-slate-200">600</strong>
+              {" · "}
+              Finale: <strong className="text-slate-200">800</strong>
+              {" · "}
+              Vinder: <strong className="text-amber-200/90">1.000</strong>
             </p>
           </div>
         </section>

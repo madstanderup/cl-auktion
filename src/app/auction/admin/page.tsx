@@ -126,27 +126,48 @@ export default function AuctionAdminPage() {
   const [resultLoading, setResultLoading] = useState<string | null>(null);
 
   useEffect(() => {
-    const stored = readAdminSession();
-    if (!stored) {
-      setSessionReady(true);
-      return;
-    }
-    // Verify the game still exists in the database (use auth-aware client)
-    void createClient()
-      .from("games")
-      .select("id")
-      .eq("id", stored.gameId)
-      .maybeSingle()
-      .then(({ data }) => {
+    void (async () => {
+      const supabaseClient = createClient();
+      const stored = readAdminSession();
+
+      if (stored) {
+        // Verify the stored game still exists
+        const { data } = await supabaseClient.from("games").select("id").eq("id", stored.gameId).maybeSingle();
         if (data?.id) {
           setSession(stored);
-        } else {
-          // Game no longer exists — clear stale session
-          localStorage.removeItem(GAME_ADMIN_SESSION_KEY);
-          setMessage("Det tidligere spil findes ikke længere. Opret et nyt.");
+          setSessionReady(true);
+          return;
         }
-        setSessionReady(true);
-      });
+        // Game no longer exists — clear stale session
+        localStorage.removeItem(GAME_ADMIN_SESSION_KEY);
+        setMessage("Det tidligere spil findes ikke længere. Opret et nyt.");
+      }
+
+      // No valid localStorage session — check if logged-in user owns a game
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      if (user) {
+        const { data: game } = await supabaseClient
+          .from("games")
+          .select("id, invite_code, label, admin_secret")
+          .eq("created_by", user.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (game?.id && game.admin_secret) {
+          const s: GameAdminSession = {
+            gameId: String(game.id),
+            adminSecret: String(game.admin_secret),
+            inviteCode: String(game.invite_code),
+            label: game.label ? String(game.label) : null,
+          };
+          saveAdminSession(s);
+          setSession(s);
+        }
+      }
+
+      setSessionReady(true);
+    })();
   }, []);
 
   const loadState = useCallback(async (gameId: string) => {

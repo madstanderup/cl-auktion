@@ -7,7 +7,7 @@ import { Loader2, Sparkles, Trophy, Users } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 import {
   GAME_ADMIN_SESSION_KEY,
   PLAYER_GAME_ID_KEY,
@@ -41,8 +41,11 @@ export default function Home() {
   const [displayName, setDisplayName] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
+    const supabase = createClient();
+    void supabase.auth.getUser().then(({ data: { user } }) => setUserEmail(user?.email ?? null));
     try {
       const raw = localStorage.getItem(GAME_ADMIN_SESSION_KEY);
       if (!raw) return;
@@ -55,34 +58,30 @@ export default function Home() {
     }
   }, []);
 
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
+
   async function handleGoToAuction() {
     const trimmed = displayName.trim();
     const code = inviteCode.trim().toUpperCase();
-    if (!code) {
-      setInviteError("Indtast invitationskoden du har fået af værten.");
-      return;
-    }
-    if (!trimmed) {
-      setNameError("Indtast venligst et navn for at fortsætte.");
-      return;
-    }
+    if (!code) { setInviteError("Indtast invitationskoden du har fået af værten."); return; }
+    if (!trimmed) { setNameError("Indtast venligst et navn for at fortsætte."); return; }
 
     setNameError(null);
     setInviteError(null);
     setIsSaving(true);
 
     try {
-      const spillerNavn = trimmed;
-      const { data: gameRow, error: gameErr } = await supabase
-        .from("games")
-        .select("id")
-        .eq("invite_code", code)
-        .maybeSingle();
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id ?? null;
 
-      if (gameErr) {
-        alert(gameErr.message);
-        return;
-      }
+      const { data: gameRow, error: gameErr } = await supabase
+        .from("games").select("id").eq("invite_code", code).maybeSingle();
+      if (gameErr) { alert(gameErr.message); return; }
       if (!gameRow?.id) {
         setInviteError("Ukendt kode — tjek med værten (store bogstaver).");
         setIsSaving(false);
@@ -91,38 +90,36 @@ export default function Home() {
 
       const gameId = String(gameRow.id);
 
-      // Tjek om spilleren allerede eksisterer (genindtræden efter refresh/tab-luk)
-      const { data: existing } = await supabase
-        .from("players")
-        .select("id")
-        .eq("game_id", gameId)
-        .eq("name", spillerNavn)
-        .maybeSingle();
+      // Rejoin: find eksisterende spiller via user_id (foretrukket) eller navn
+      let existingId: string | null = null;
+      if (userId) {
+        const { data } = await supabase
+          .from("players").select("id,name").eq("game_id", gameId).eq("user_id", userId).maybeSingle();
+        if (data?.id) existingId = String(data.id);
+      }
+      if (!existingId) {
+        const { data } = await supabase
+          .from("players").select("id").eq("game_id", gameId).eq("name", trimmed).maybeSingle();
+        if (data?.id) existingId = String(data.id);
+      }
 
-      const playerId = existing?.id
-        ? String(existing.id)
-        : await (async () => {
-            const { data, error } = await supabase
-              .from("players")
-              .insert([{ name: spillerNavn, coins: 1000, points: 0, game_id: gameId }])
-              .select("id")
-              .single();
-            if (error) throw error;
-            return String(data.id);
-          })();
+      const playerId = existingId ?? await (async () => {
+        const row: Record<string, unknown> = { name: trimmed, coins: 1000, points: 0, game_id: gameId };
+        if (userId) row.user_id = userId;
+        const { data, error } = await supabase.from("players").insert([row]).select("id").single();
+        if (error) throw error;
+        return String(data.id);
+      })();
 
       try {
         localStorage.setItem(PLAYER_ID_KEY, playerId);
-        localStorage.setItem(PLAYER_NAME_KEY, spillerNavn);
+        localStorage.setItem(PLAYER_NAME_KEY, trimmed);
         localStorage.setItem(PLAYER_GAME_ID_KEY, gameId);
-      } catch {
-        /* ignore storage errors (private mode etc.) */
-      }
+      } catch { /* ignore */ }
 
       router.push("/auction");
     } catch (e) {
-      const message =
-        e instanceof Error ? e.message : "Uventet fejl ved oprettelse af spiller.";
+      const message = e instanceof Error ? e.message : "Uventet fejl ved oprettelse af spiller.";
       alert(message);
     } finally {
       setIsSaving(false);
@@ -345,6 +342,19 @@ export default function Home() {
               opret nyt spil og få en kode
             </Link>
           </p>
+
+          {userEmail && (
+            <div className="mt-4 flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2">
+              <span className="text-xs text-slate-500 truncate">{userEmail}</span>
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                className="ml-3 shrink-0 text-xs text-slate-400 hover:text-red-300 underline-offset-2 hover:underline"
+              >
+                Log ud
+              </button>
+            </div>
+          )}
         </div>
       </main>
     </div>

@@ -105,7 +105,7 @@ export default function ScorePage() {
         supabase.from("players").select("id,name,coins,points,game_id").eq("id", pid).maybeSingle(),
         supabase
           .from("game_teams")
-          .select("team_id, teams(name, flag_emoji)")
+          .select("team_id, teams(name)")
           .eq("game_id", gid)
           .eq("owner_player_id", pid),
         supabase
@@ -166,7 +166,7 @@ export default function ScorePage() {
 
     const teams: TeamRow[] = [];
     for (const row of roster ?? []) {
-      const r = row as { teams?: { name?: string; flag_emoji?: string | null } | null };
+      const r = row as { teams?: { name?: string } | null };
       const nm = r.teams?.name;
       if (nm) {
         teams.push({ name: String(nm), points: calcTeamPoints(String(nm), matches) });

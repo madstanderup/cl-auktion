@@ -428,6 +428,15 @@ export default function Home() {
                 </Link>
               </p>
 
+              <Link
+                href="/auction/admin"
+                className={cn(
+                  "flex items-center justify-center gap-2 rounded-lg border border-amber-400/20 bg-amber-500/10 px-4 py-2.5 text-sm font-medium text-amber-200/90 transition-colors hover:bg-amber-500/20",
+                )}
+              >
+                🛡️ Gå til spil-admin
+              </Link>
+
               {userEmail && (
                 <div className="mt-4 flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2">
                   <span className="text-xs text-slate-500 truncate">{userEmail}</span>

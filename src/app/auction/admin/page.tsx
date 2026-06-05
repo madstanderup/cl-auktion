@@ -144,15 +144,18 @@ export default function AuctionAdminPage() {
       }
 
       // No valid localStorage session — check if logged-in user owns a game
-      const { data: { user } } = await supabaseClient.auth.getUser();
+      const { data: { user }, error: userErr } = await supabaseClient.auth.getUser();
+      console.log("[admin] auth user:", user?.id, userErr?.message);
       if (user) {
-        const { data: game } = await supabaseClient
+        const { data: game, error: gameErr } = await supabaseClient
           .from("games")
           .select("id, invite_code, label, admin_secret")
           .eq("created_by", user.id)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
+
+        console.log("[admin] game from DB:", game?.id, "admin_secret present:", !!game?.admin_secret, "error:", gameErr?.message);
 
         if (game?.id && game.admin_secret) {
           const s: GameAdminSession = {

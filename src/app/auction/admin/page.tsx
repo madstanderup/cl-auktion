@@ -686,6 +686,7 @@ export default function AuctionAdminPage() {
   }
 
   if (!session) {
+    console.log("[admin] rendering: no session — showing create form");
     return (
       <div className="min-h-screen bg-[#030711] px-4 py-10 text-slate-100">
         <div className="mx-auto w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/40 backdrop-blur">

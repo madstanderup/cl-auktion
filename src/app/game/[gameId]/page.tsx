@@ -154,7 +154,8 @@ export default function GameDashboard() {
           else if (won) pts += 150;  // win normal time in group
         } else {
           if (isET) {
-            pts += 100; // both teams get 100 when match goes to ET/pen (50 draw + 50 bonus)
+            pts += 50; // begge hold: 50 for uafgjort i ordinær tid
+            if (won) pts += 50; // kun vinderen: 50 bonus for at vinde i ET/straffe
           } else if (won) {
             pts += 150; // win normal time in knockout
           }

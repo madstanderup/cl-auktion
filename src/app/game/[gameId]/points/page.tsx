@@ -58,7 +58,8 @@ function calcPoints(teams: Team[], matches: MatchRow[]) {
           else if (won) pts += 150;
         } else {
           if (isET) {
-            pts += 100; // begge hold: 50 uafgjort + 50 bonus
+            pts += 50; // begge hold: 50 for uafgjort i ordinær tid
+            if (won) pts += 50; // kun vinderen: 50 bonus for at vinde i ET/straffe
           } else if (won) {
             pts += 150;
           }

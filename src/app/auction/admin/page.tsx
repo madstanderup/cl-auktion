@@ -120,8 +120,8 @@ export default function AuctionAdminPage() {
   const [newMatchAway, setNewMatchAway] = useState("");
   const [newMatchStage, setNewMatchStage] = useState("group");
   const [matchAddLoading, setMatchAddLoading] = useState(false);
-  // Per-kamp resultat-form state: matchId → {homeScore, awayScore, resultType, winnerSide}
-  const [resultForms, setResultForms] = useState<Record<string, { home: string; away: string; type: string; winnerSide: string }>>({});
+  // Per-kamp resultat-form state: matchId → {homeScore, awayScore, resultType}
+  const [resultForms, setResultForms] = useState<Record<string, { home: string; away: string; type: string }>>({});
   const [resultLoading, setResultLoading] = useState<string | null>(null);
 
   useEffect(() => {
@@ -559,10 +559,6 @@ export default function AuctionAdminPage() {
     if (isNaN(homeScore) || isNaN(awayScore) || homeScore < 0 || awayScore < 0) {
       setMessage("Ugyldigt resultat — angiv hele tal ≥ 0."); return;
     }
-    const isET = form.type === "extra_time" || form.type === "penalties";
-    if (isET && !form.winnerSide) {
-      setMessage("Angiv hvem der vandt (hjemme- eller udehold)."); return;
-    }
     setResultLoading(matchId);
     setMessage(null);
     try {
@@ -574,7 +570,6 @@ export default function AuctionAdminPage() {
           p_home_score:   homeScore,
           p_away_score:   awayScore,
           p_result_type:  form.type,
-          p_winner_side:  isET ? form.winnerSide : null,
         }),
         "Registrering af resultat",
       );
@@ -940,10 +935,9 @@ export default function AuctionAdminPage() {
               <p className="py-2 text-xs text-slate-500">Ingen kampe tilføjet endnu.</p>
             ) : (
               matches.map((m) => {
-                const form = resultForms[m.id] ?? { home: "", away: "", type: "normal_time", winnerSide: "" };
+                const form = resultForms[m.id] ?? { home: "", away: "", type: "normal_time" };
                 const isFinished = m.status === "finished";
                 const isKnockout = m.stage !== "group";
-                const isET = form.type === "extra_time" || form.type === "penalties";
                 return (
                   <div key={m.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
                     <div className="flex items-start justify-between gap-2">
@@ -1003,17 +997,6 @@ export default function AuctionAdminPage() {
                             <option value="normal_time">Ordinær tid</option>
                             <option value="extra_time">Forlænget tid</option>
                             <option value="penalties">Straffespark</option>
-                          </select>
-                        )}
-                        {isKnockout && isET && (
-                          <select
-                            value={form.winnerSide}
-                            onChange={(e) => setResultForms((prev) => ({ ...prev, [m.id]: { ...form, winnerSide: e.target.value } }))}
-                            className="h-8 rounded-md border border-amber-400/40 bg-white/[0.06] px-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-400"
-                          >
-                            <option value="">Hvem vandt?</option>
-                            <option value="home">{m.home_team}</option>
-                            <option value="away">{m.away_team}</option>
                           </select>
                         )}
                         <Button

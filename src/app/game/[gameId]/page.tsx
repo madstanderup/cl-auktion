@@ -121,14 +121,10 @@ export default function GameDashboard() {
     setLoading(false);
   }
 
-  // Helper: is teamName the winner of this match?
+  // Helper: winner always determined by score (ET/pen score reflects actual winner)
   function isWinner(m: MatchRow, teamName: string): boolean {
-    if (m.result_type === "normal_time") {
-      const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
-      return (m.home_team === teamName && hs > as_) || (m.away_team === teamName && as_ > hs);
-    }
-    return (m.winner_side === "home" && m.home_team === teamName) ||
-           (m.winner_side === "away" && m.away_team === teamName);
+    const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
+    return (m.home_team === teamName && hs > as_) || (m.away_team === teamName && as_ > hs);
   }
   function isLoser(m: MatchRow, teamName: string): boolean {
     const plays = m.home_team === teamName || m.away_team === teamName;

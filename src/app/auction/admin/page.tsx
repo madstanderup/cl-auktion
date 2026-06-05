@@ -273,9 +273,15 @@ export default function AuctionAdminPage() {
     setLoading(true);
     setMessage(null);
     try {
+      // Get current auth user so we can store created_by
+      const { createClient } = await import("@/lib/supabase/client");
+      const authClient = createClient();
+      const { data: { user } } = await authClient.auth.getUser();
+
       const { data, error } = await withTimeout(
         supabase.rpc("create_game", {
           p_label: newGameLabel.trim() || null,
+          p_created_by: user?.id ?? null,
         }),
         "Oprettelse af spil",
       );

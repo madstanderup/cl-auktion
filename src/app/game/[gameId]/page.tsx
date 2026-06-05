@@ -27,7 +27,7 @@ type Player = { id: string; name: string; coins: number; points: number };
 type MatchRow = {
   home_team: string; away_team: string; stage: string;
   home_score: number | null; away_score: number | null;
-  result_type: string | null; status: string;
+  result_type: string | null; winner_side: string | null; status: string;
 };
 
 function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
@@ -42,7 +42,15 @@ function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
       const isHome = m.home_team === teamName;
       const myScore = isHome ? hs : as_, opScore = isHome ? as_ : hs;
       const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-      const won = myScore > opScore, lost = myScore < opScore;
+      // For penalties with tied score, use winner_side to determine won/lost
+      let won: boolean, lost: boolean;
+      if (m.result_type === "penalties" && m.winner_side) {
+        won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+        lost = !won;
+      } else {
+        won = myScore > opScore;
+        lost = myScore < opScore;
+      }
       if (stage.key === "group") {
         if (hs === as_) total += 50;
         else if (won) total += 150;
@@ -107,7 +115,7 @@ export default function GamePage() {
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("players").select("id, name, coins, points").eq("game_id", gameId).order("points", { ascending: false }),
       supabase.from("auction_state").select("status").eq("game_id", gameId).maybeSingle(),
-      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,status").eq("game_id", gameId),
+      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").eq("game_id", gameId),
     ]);
 
     const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
@@ -127,6 +135,7 @@ export default function GamePage() {
       home_score: m.home_score != null ? Number(m.home_score) : null,
       away_score: m.away_score != null ? Number(m.away_score) : null,
       result_type: m.result_type ? String(m.result_type) : null,
+      winner_side: m.winner_side ? String(m.winner_side) : null,
       status: String(m.status),
     }));
 

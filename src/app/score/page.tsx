@@ -39,6 +39,7 @@ type MatchRow = {
   home_score: number | null;
   away_score: number | null;
   result_type: string | null;
+  winner_side: string | null;
   status: string;
 };
 
@@ -58,8 +59,14 @@ function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
       const myScore = isHome ? hs : as_;
       const opScore = isHome ? as_ : hs;
       const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-      const won = myScore > opScore;
-      const lost = myScore < opScore;
+      let won: boolean, lost: boolean;
+      if (m.result_type === "penalties" && m.winner_side) {
+        won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+        lost = !won;
+      } else {
+        won = myScore > opScore;
+        lost = myScore < opScore;
+      }
 
       if (stage.key === "group") {
         if (hs === as_) total += 50;
@@ -116,7 +123,7 @@ export default function ScorePage() {
           .order("name", { ascending: true }),
         supabase
           .from("wc_matches")
-          .select("home_team,away_team,stage,home_score,away_score,result_type,status")
+          .select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status")
           .eq("game_id", gid),
       ]);
 
@@ -161,6 +168,7 @@ export default function ScorePage() {
       home_score: m.home_score != null ? Number(m.home_score) : null,
       away_score: m.away_score != null ? Number(m.away_score) : null,
       result_type: m.result_type ? String(m.result_type) : null,
+      winner_side: m.winner_side ? String(m.winner_side) : null,
       status: String(m.status),
     }));
 

@@ -29,8 +29,21 @@ type MatchRow = {
   home_score: number | null;
   away_score: number | null;
   result_type: string | null;
+  winner_side: string | null;
   status: string;
 };
+
+function resolveWonLost(m: MatchRow, teamName: string): { won: boolean; lost: boolean } {
+  const isHome = m.home_team === teamName;
+  // For penalties: score can be tied — use winner_side if available
+  if (m.result_type === "penalties" && m.winner_side) {
+    const won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+    return { won, lost: !won };
+  }
+  const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
+  const my = isHome ? hs : as_, op = isHome ? as_ : hs;
+  return { won: my > op, lost: my < op };
+}
 
 function calcPoints(teams: Team[], matches: MatchRow[]) {
   const matrix = new Map<string, Map<string, number>>();
@@ -46,12 +59,8 @@ function calcPoints(teams: Team[], matches: MatchRow[]) {
       let pts = 0;
       for (const m of ms) {
         const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
-        const isHome = m.home_team === team.name;
-        const myScore = isHome ? hs : as_;
-        const opScore = isHome ? as_ : hs;
         const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-        const won = myScore > opScore;
-        const lost = myScore < opScore;
+        const { won, lost } = resolveWonLost(m, team.name);
 
         if (stage.key === "group") {
           if (hs === as_) pts += 50;
@@ -107,7 +116,7 @@ export default function PointsPage() {
         .select("team_id, owner_id, teams(id, name, flag_emoji), players(id, name)")
         .eq("game_id", gameId),
       supabase.from("wc_matches")
-        .select("id, home_team, away_team, stage, home_score, away_score, result_type, status")
+        .select("id, home_team, away_team, stage, home_score, away_score, result_type, winner_side, status")
         .eq("game_id", gameId),
     ]);
 
@@ -133,6 +142,7 @@ export default function PointsPage() {
       home_score: m.home_score != null ? Number(m.home_score) : null,
       away_score: m.away_score != null ? Number(m.away_score) : null,
       result_type: m.result_type ? String(m.result_type) : null,
+      winner_side: m.winner_side ? String(m.winner_side) : null,
       status: String(m.status),
     }));
 

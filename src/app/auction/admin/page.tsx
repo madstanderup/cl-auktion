@@ -14,6 +14,7 @@ import {
   PLAYER_NAME_KEY,
 } from "@/lib/player-storage";
 import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
 type AuctionState = {
@@ -130,8 +131,8 @@ export default function AuctionAdminPage() {
       setSessionReady(true);
       return;
     }
-    // Verify the game still exists in the database
-    void supabase
+    // Verify the game still exists in the database (use auth-aware client)
+    void createClient()
       .from("games")
       .select("id")
       .eq("id", stored.gameId)

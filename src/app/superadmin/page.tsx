@@ -151,6 +151,30 @@ export default function SuperAdminPage() {
     }
   }
 
+  async function handleDeleteGame(game: GameRow) {
+    if (!window.confirm(`Slet spillet "${game.label ?? game.invite_code}" permanent? Alle spillere og bud slettes også.`)) return;
+    setActionLoading(`delete-game-${game.id}`);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/superadmin/delete-game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gameId: game.id }),
+      });
+      const body = await res.json() as { ok?: boolean; error?: string };
+      if (body.ok) {
+        setMessage(`Spillet "${game.label ?? game.invite_code}" er slettet.`);
+        setGames((prev) => prev.filter((g) => g.id !== game.id));
+      } else {
+        setMessage(body.error ?? "Fejl.");
+      }
+    } catch {
+      setMessage("Netværksfejl.");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -226,11 +250,28 @@ export default function SuperAdminPage() {
                         <span>Oprettet {new Date(g.created_at).toLocaleDateString("da-DK")}</span>
                       </p>
                     </div>
-                    {statusInfo && (
-                      <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[0.65rem] font-medium ${statusInfo.color}`}>
-                        {statusInfo.label}
-                      </span>
-                    )}
+                    <div className="flex shrink-0 items-center gap-2">
+                      {statusInfo && (
+                        <span className={`rounded-full px-2.5 py-0.5 text-[0.65rem] font-medium ${statusInfo.color}`}>
+                          {statusInfo.label}
+                        </span>
+                      )}
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="gap-1 text-xs"
+                        disabled={actionLoading === `delete-game-${g.id}`}
+                        onClick={() => void handleDeleteGame(g)}
+                      >
+                        {actionLoading === `delete-game-${g.id}` ? (
+                          <Loader2 className="size-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="size-3" />
+                        )}
+                        Slet
+                      </Button>
+                    </div>
                   </li>
                 );
               })}

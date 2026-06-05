@@ -29,7 +29,7 @@ export default function RegisterPage() {
       const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
-        options: { emailRedirectTo: `${window.location.origin}/` },
+        options: { emailRedirectTo: `${window.location.origin}/auth/confirm` },
       });
       if (error) { setError(error.message); return; }
       setDone(true);

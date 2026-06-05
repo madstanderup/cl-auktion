@@ -124,8 +124,27 @@ export default function AuctionAdminPage() {
   const [resultLoading, setResultLoading] = useState<string | null>(null);
 
   useEffect(() => {
-    setSession(readAdminSession());
-    setSessionReady(true);
+    const stored = readAdminSession();
+    if (!stored) {
+      setSessionReady(true);
+      return;
+    }
+    // Verify the game still exists in the database
+    void supabase
+      .from("games")
+      .select("id")
+      .eq("id", stored.gameId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.id) {
+          setSession(stored);
+        } else {
+          // Game no longer exists — clear stale session
+          localStorage.removeItem(GAME_ADMIN_SESSION_KEY);
+          setMessage("Det tidligere spil findes ikke længere. Opret et nyt.");
+        }
+        setSessionReady(true);
+      });
   }, []);
 
   const loadState = useCallback(async (gameId: string) => {

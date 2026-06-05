@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -8,7 +8,7 @@ import Link from "next/link";
 
 type Status = "loading" | "success" | "error";
 
-export default function AuthConfirmPage() {
+function ConfirmInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<Status>("loading");
@@ -114,5 +114,17 @@ export default function AuthConfirmPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AuthConfirmPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-[#030711]">
+        <Loader2 className="size-8 animate-spin text-amber-400/60" />
+      </div>
+    }>
+      <ConfirmInner />
+    </Suspense>
   );
 }

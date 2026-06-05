@@ -161,7 +161,7 @@ export default function AuctionAdminPage() {
             inviteCode: String(game.invite_code),
             label: game.label ? String(game.label) : null,
           };
-          saveAdminSession(s);
+          writeAdminSession(s);
           setSession(s);
         }
       }

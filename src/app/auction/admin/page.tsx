@@ -110,6 +110,8 @@ export default function AuctionAdminPage() {
   const [newGameLabel, setNewGameLabel] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [myGames, setMyGames] = useState<{ id: string; label: string | null; invite_code: string; admin_secret: string }[]>([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
   const [state, setState] = useState<AuctionState | null>(null);
   const [players, setPlayers] = useState<PlayerListRow[]>([]);
   const [playersLoading, setPlayersLoading] = useState(true);
@@ -127,29 +129,17 @@ export default function AuctionAdminPage() {
   const [resultForms, setResultForms] = useState<Record<string, { home: string; away: string; type: string }>>({});
   const [resultLoading, setResultLoading] = useState<string | null>(null);
 
-  async function restoreSessionFromDB(): Promise<boolean> {
-    const supabaseClient = createClient();
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) return false;
-    const { data: game } = await supabaseClient
-      .from("games")
-      .select("id, invite_code, label, admin_secret")
-      .eq("created_by", user.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (game?.id && game.admin_secret) {
-      const s: GameAdminSession = {
-        gameId: String(game.id),
-        adminSecret: String(game.admin_secret),
-        inviteCode: String(game.invite_code),
-        label: game.label ? String(game.label) : null,
-      };
-      writeAdminSession(s);
-      setSession(s);
-      return true;
-    }
-    return false;
+  function enterGame(game: { id: string; label: string | null; invite_code: string; admin_secret: string }) {
+    const s: GameAdminSession = {
+      gameId: String(game.id),
+      adminSecret: String(game.admin_secret),
+      inviteCode: String(game.invite_code),
+      label: game.label ? String(game.label) : null,
+    };
+    writeAdminSession(s);
+    setSession(s);
+    setShowCreateForm(false);
+    setMessage(null);
   }
 
   useEffect(() => {
@@ -157,6 +147,7 @@ export default function AuctionAdminPage() {
       const supabaseClient = createClient();
       const stored = readAdminSession();
 
+      // Verify stored session
       if (stored) {
         const { data } = await supabaseClient.from("games").select("id").eq("id", stored.gameId).maybeSingle();
         if (data?.id) {
@@ -167,7 +158,28 @@ export default function AuctionAdminPage() {
         localStorage.removeItem(GAME_ADMIN_SESSION_KEY);
       }
 
-      await restoreSessionFromDB();
+      // Load all games owned by this user
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      if (user) {
+        const { data: games } = await supabaseClient
+          .from("games")
+          .select("id, invite_code, label, admin_secret")
+          .eq("created_by", user.id)
+          .order("created_at", { ascending: false });
+
+        const list = (games ?? []).filter((g: Record<string, unknown>) => g.admin_secret) as {
+          id: string; label: string | null; invite_code: string; admin_secret: string;
+        }[];
+
+        if (list.length === 1) {
+          // Only one game — enter it automatically
+          enterGame(list[0]);
+        } else if (list.length > 1) {
+          // Multiple games — show picker
+          setMyGames(list);
+        }
+      }
+
       setSessionReady(true);
     })();
   }, []);
@@ -676,30 +688,76 @@ export default function AuctionAdminPage() {
         <div className="mx-auto w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/40 backdrop-blur">
           <div className="flex items-center gap-3">
             <ShieldCheck className="size-5 text-amber-300" />
-            <h1 className="text-xl font-semibold tracking-tight">Opret auktionsspil</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Auktion Admin</h1>
           </div>
-          <p className="mt-2 text-sm text-slate-400">
-            Du får en invitationskode du kan dele. Hvert spil har sin egen auktion og spillere.
-          </p>
-          <label htmlFor="game-label" className="mt-6 block text-xs font-medium text-slate-400">
-            Navn på spillet (valgfrit)
-          </label>
-          <Input
-            id="game-label"
-            value={newGameLabel}
-            onChange={(e) => setNewGameLabel(e.target.value)}
-            placeholder="Fx. Fredagshygge"
-            className="mt-2 h-11 border-white/15 bg-white/[0.06] text-white"
-          />
-          <Button
-            type="button"
-            className="mt-4 w-full gap-2"
-            disabled={loading}
-            onClick={() => void handleCreateGame()}
-          >
-            {loading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-            Opret nyt spil
-          </Button>
+
+          {/* Spil-vælger */}
+          {myGames.length > 0 && !showCreateForm && (
+            <div className="mt-6 space-y-2">
+              <p className="text-sm text-slate-400">Vælg spil:</p>
+              {myGames.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => enterGame(g)}
+                  className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left hover:bg-white/[0.08] transition-colors"
+                >
+                  <p className="font-medium text-white">{g.label ?? "Unavngivet spil"}</p>
+                  <p className="text-xs text-slate-500 font-mono mt-0.5">{g.invite_code}</p>
+                </button>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2 w-full gap-2 border-white/15"
+                onClick={() => setShowCreateForm(true)}
+              >
+                <Plus className="size-4" />
+                Opret nyt spil
+              </Button>
+            </div>
+          )}
+
+          {/* Opret-formular */}
+          {(myGames.length === 0 || showCreateForm) && (
+            <div className="mt-6">
+              {myGames.length === 0 && (
+                <p className="mb-4 text-sm text-slate-400">
+                  Du får en invitationskode du kan dele. Hvert spil har sin egen auktion og spillere.
+                </p>
+              )}
+              <label htmlFor="game-label" className="block text-xs font-medium text-slate-400">
+                Navn på spillet (valgfrit)
+              </label>
+              <Input
+                id="game-label"
+                value={newGameLabel}
+                onChange={(e) => setNewGameLabel(e.target.value)}
+                placeholder="Fx. Fredagshygge"
+                className="mt-2 h-11 border-white/15 bg-white/[0.06] text-white"
+              />
+              <Button
+                type="button"
+                className="mt-4 w-full gap-2"
+                disabled={loading}
+                onClick={() => void handleCreateGame()}
+              >
+                {loading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                Opret nyt spil
+              </Button>
+              {showCreateForm && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2 w-full border-white/15"
+                  onClick={() => setShowCreateForm(false)}
+                >
+                  ← Tilbage til mine spil
+                </Button>
+              )}
+            </div>
+          )}
+
           {message ? (
             <p className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
               {message}
@@ -721,9 +779,14 @@ export default function AuctionAdminPage() {
             <ShieldCheck className="size-5 text-amber-300" />
             <h1 className="text-xl font-semibold tracking-tight">Auktion Admin</h1>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => router.push("/")}>
-            ← Forsiden
-          </Button>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => { localStorage.removeItem(GAME_ADMIN_SESSION_KEY); setSession(null); }}>
+              Skift spil
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => router.push("/")}>
+              ← Forsiden
+            </Button>
+          </div>
         </div>
 
         <div className="mt-4 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3">

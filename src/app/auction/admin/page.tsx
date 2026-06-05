@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Copy, Loader2, Plus, ShieldCheck, Trash2, Trophy } from "lucide-react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -103,6 +104,7 @@ function writeAdminSession(s: GameAdminSession) {
 }
 
 export default function AuctionAdminPage() {
+  const router = useRouter();
   const [session, setSession] = useState<GameAdminSession | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [newGameLabel, setNewGameLabel] = useState("");
@@ -351,19 +353,6 @@ export default function AuctionAdminPage() {
     }
   }
 
-  async function handleLeaveAdmin() {
-    localStorage.removeItem(GAME_ADMIN_SESSION_KEY);
-    try {
-      localStorage.removeItem(PLAYER_GAME_ID_KEY);
-      localStorage.removeItem(PLAYER_ID_KEY);
-      localStorage.removeItem(PLAYER_NAME_KEY);
-    } catch { /* ignore */ }
-    setSession(null);
-    setState(null);
-    setPlayers([]);
-    // Try to restore from DB (in case user is logged in as owner)
-    await restoreSessionFromDB();
-  }
 
   async function rpcArgs() {
     const s = session;
@@ -732,8 +721,8 @@ export default function AuctionAdminPage() {
             <ShieldCheck className="size-5 text-amber-300" />
             <h1 className="text-xl font-semibold tracking-tight">Auktion Admin</h1>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => handleLeaveAdmin()}>
-            Skift spil
+          <Button type="button" variant="outline" size="sm" onClick={() => router.push("/")}>
+            ← Forsiden
           </Button>
         </div>
 

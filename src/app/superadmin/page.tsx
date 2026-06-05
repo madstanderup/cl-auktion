@@ -18,6 +18,7 @@ type GameRow = {
   invite_code: string;
   label: string | null;
   created_at: string;
+  created_by: string | null;
   player_count: number;
   auction_status: string | null;
 };
@@ -72,7 +73,7 @@ export default function SuperAdminPage() {
       const supabase = createClient();
       const { data: gameRows } = await supabase
         .from("games")
-        .select("id, invite_code, label, created_at")
+        .select("id, invite_code, label, created_at, created_by")
         .order("created_at", { ascending: false });
 
       if (!gameRows || gameRows.length === 0) { setGames([]); return; }
@@ -95,11 +96,12 @@ export default function SuperAdminPage() {
         auctionMap.set(String(a.game_id), a.status as string);
       }
 
-      setGames(gameRows.map((g: { id: string; invite_code: string; label: string | null; created_at: string }) => ({
+      setGames(gameRows.map((g: { id: string; invite_code: string; label: string | null; created_at: string; created_by: string | null }) => ({
         id: g.id,
         invite_code: g.invite_code,
         label: g.label,
         created_at: g.created_at,
+        created_by: g.created_by ?? null,
         player_count: playerCounts.get(String(g.id)) ?? 0,
         auction_status: auctionMap.get(String(g.id)) ?? null,
       })));
@@ -248,6 +250,11 @@ export default function SuperAdminPage() {
                           {g.player_count} {g.player_count === 1 ? "spiller" : "spillere"}
                         </span>
                         <span>Oprettet {new Date(g.created_at).toLocaleDateString("da-DK")}</span>
+                        {g.created_by && (
+                          <span className="text-slate-400">
+                            Admin: {users.find((u) => u.id === g.created_by)?.email ?? <span className="italic text-slate-600">ukendt</span>}
+                          </span>
+                        )}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">

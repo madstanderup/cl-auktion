@@ -617,6 +617,14 @@ export default function AuctionPage() {
             >
               Stilling
             </Link>
+            {gameId && (
+              <Link
+                href={`/game/${gameId}/points`}
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-amber-400/30 text-xs text-amber-200/90")}
+              >
+                Pointoversigt
+              </Link>
+            )}
             <div className="flex items-baseline gap-2 rounded-xl border border-white/[0.08] bg-black/25 px-4 py-2">
               <span className="text-xs uppercase tracking-wider text-slate-500">Mønter</span>
               <span className="text-lg font-semibold tabular-nums text-amber-200">

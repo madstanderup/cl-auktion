@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw, ShieldCheck, Trash2, KeyRound } from "lucide-react";
+import { Loader2, RefreshCw, ShieldCheck, Trash2, KeyRound, Gamepad2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 
@@ -13,9 +13,27 @@ type UserRow = {
   email_confirmed_at: string | null;
 };
 
+type GameRow = {
+  id: string;
+  invite_code: string;
+  label: string | null;
+  created_at: string;
+  player_count: number;
+  auction_status: string | null;
+};
+
+const AUCTION_STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  waiting:  { label: "Venter på spillere", color: "text-slate-400 bg-slate-700/40" },
+  bidding:  { label: "Auktion igangværende", color: "text-emerald-300 bg-emerald-500/15" },
+  reveal:   { label: "Afslører bud", color: "text-amber-300 bg-amber-500/15" },
+  finished: { label: "Afsluttet", color: "text-slate-500 bg-slate-800/60" },
+};
+
 export default function SuperAdminPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [games, setGames] = useState<GameRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [gamesLoading, setGamesLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
@@ -26,6 +44,7 @@ export default function SuperAdminPage() {
       setCurrentEmail(user?.email ?? null);
     });
     void loadUsers();
+    void loadGames();
   }, []);
 
   async function loadUsers() {
@@ -44,6 +63,48 @@ export default function SuperAdminPage() {
       setMessage("Netværksfejl.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadGames() {
+    setGamesLoading(true);
+    try {
+      const supabase = createClient();
+      const { data: gameRows } = await supabase
+        .from("games")
+        .select("id, invite_code, label, created_at")
+        .order("created_at", { ascending: false });
+
+      if (!gameRows || gameRows.length === 0) { setGames([]); return; }
+
+      const gameIds = gameRows.map((g: { id: string }) => g.id);
+
+      const [playersRes, auctionRes] = await Promise.all([
+        supabase.from("players").select("game_id").in("game_id", gameIds),
+        supabase.from("auction_state").select("game_id, status").in("game_id", gameIds),
+      ]);
+
+      const playerCounts = new Map<string, number>();
+      for (const p of playersRes.data ?? []) {
+        const gid = String(p.game_id);
+        playerCounts.set(gid, (playerCounts.get(gid) ?? 0) + 1);
+      }
+
+      const auctionMap = new Map<string, string>();
+      for (const a of auctionRes.data ?? []) {
+        auctionMap.set(String(a.game_id), a.status as string);
+      }
+
+      setGames(gameRows.map((g: { id: string; invite_code: string; label: string | null; created_at: string }) => ({
+        id: g.id,
+        invite_code: g.invite_code,
+        label: g.label,
+        created_at: g.created_at,
+        player_count: playerCounts.get(String(g.id)) ?? 0,
+        auction_status: auctionMap.get(String(g.id)) ?? null,
+      })));
+    } finally {
+      setGamesLoading(false);
     }
   }
 
@@ -96,17 +157,23 @@ export default function SuperAdminPage() {
     window.location.href = "/login";
   }
 
+  function refreshAll() {
+    void loadUsers();
+    void loadGames();
+  }
+
   return (
     <div className="min-h-screen bg-[#030711] px-4 py-10 text-slate-100">
-      <div className="mx-auto w-full max-w-3xl">
+      <div className="mx-auto w-full max-w-3xl space-y-8">
+        {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <ShieldCheck className="size-5 text-amber-300" />
             <h1 className="text-xl font-semibold tracking-tight">SuperAdmin</h1>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => void loadUsers()} disabled={loading}>
-              <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+            <Button variant="outline" size="sm" onClick={refreshAll} disabled={loading || gamesLoading}>
+              <RefreshCw className={`size-3.5 ${(loading || gamesLoading) ? "animate-spin" : ""}`} />
             </Button>
             <Button variant="outline" size="sm" onClick={() => void handleLogout()}>
               Log ud
@@ -115,16 +182,64 @@ export default function SuperAdminPage() {
         </div>
 
         {currentEmail && (
-          <p className="mt-1 text-xs text-slate-500">Logget ind som <span className="text-slate-300">{currentEmail}</span></p>
+          <p className="-mt-6 text-xs text-slate-500">Logget ind som <span className="text-slate-300">{currentEmail}</span></p>
         )}
 
         {message && (
-          <p className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+          <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
             {message}
           </p>
         )}
 
-        <div className="mt-6 rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl">
+        {/* ── Spil ── */}
+        <div className="rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl">
+          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
+            <Gamepad2 className="size-4 text-amber-400/80" />
+            <p className="text-sm font-medium text-white">
+              Spil
+              <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-400">{games.length}</span>
+            </p>
+          </div>
+
+          {gamesLoading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="size-6 animate-spin text-amber-400/80" />
+            </div>
+          ) : games.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-slate-400">Ingen spil oprettet endnu.</p>
+          ) : (
+            <ul className="divide-y divide-white/[0.06]">
+              {games.map((g) => {
+                const statusInfo = g.auction_status ? (AUCTION_STATUS_LABEL[g.auction_status] ?? { label: g.auction_status, color: "text-slate-400 bg-slate-700/40" }) : null;
+                return (
+                  <li key={g.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-white">
+                        {g.label ?? `Spil ${g.invite_code}`}
+                      </p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span className="font-mono tracking-wider text-slate-400">{g.invite_code}</span>
+                        <span className="flex items-center gap-1">
+                          <Users className="size-3" />
+                          {g.player_count} {g.player_count === 1 ? "spiller" : "spillere"}
+                        </span>
+                        <span>Oprettet {new Date(g.created_at).toLocaleDateString("da-DK")}</span>
+                      </p>
+                    </div>
+                    {statusInfo && (
+                      <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[0.65rem] font-medium ${statusInfo.color}`}>
+                        {statusInfo.label}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* ── Brugere ── */}
+        <div className="rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl">
           <div className="border-b border-white/10 px-4 py-3">
             <p className="text-sm font-medium text-white">
               Brugere <span className="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-400">{users.length}</span>

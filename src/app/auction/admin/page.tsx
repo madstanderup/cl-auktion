@@ -559,6 +559,49 @@ export default function AuctionAdminPage() {
     }
   }
 
+  async function handleRandomAssign() {
+    if (!session) return;
+    if (!window.confirm("Tildel alle uejede hold tilfældigt til spillerne?")) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      // Fetch unowned teams
+      const { data: unowned, error: e1 } = await supabase
+        .from("game_teams")
+        .select("id")
+        .eq("game_id", session.gameId)
+        .is("owner_player_id", null);
+      if (e1) { setMessage(`Fejl: ${e1.message}`); return; }
+      if (!unowned || unowned.length === 0) { setMessage("Ingen ledige hold at tildele."); return; }
+
+      const { data: playerList, error: e2 } = await supabase
+        .from("players")
+        .select("id")
+        .eq("game_id", session.gameId);
+      if (e2 || !playerList || playerList.length === 0) { setMessage("Ingen spillere at tildele til."); return; }
+
+      // Shuffle teams
+      const shuffled = [...unowned].sort(() => Math.random() - 0.5);
+
+      // Assign round-robin
+      const updates = shuffled.map((gt, i) => ({
+        id: gt.id as string,
+        owner_player_id: (playerList[i % playerList.length] as { id: string }).id,
+      }));
+
+      for (const u of updates) {
+        await supabase.from("game_teams").update({ owner_player_id: u.owner_player_id }).eq("id", u.id);
+      }
+
+      setMessage(`${updates.length} hold tildelt tilfældigt.`);
+      void loadTeamNames(session.gameId);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Ukendt fejl.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleDeleteMatch(matchId: string) {
     if (!session) return;
     if (!window.confirm("Slet denne kamp? Point genberegnes.")) return;
@@ -677,15 +720,26 @@ export default function AuctionAdminPage() {
           </Button>
         </div>
 
-        <Button
-          onClick={() => void handleResetGame()}
-          disabled={loading}
-          variant="destructive"
-          className="mt-3 w-full"
-        >
-          {loading ? <Loader2 className="size-4 animate-spin" /> : null}
-          Nulstil dette spil
-        </Button>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Button
+            onClick={() => void handleRandomAssign()}
+            disabled={loading}
+            variant="secondary"
+            className="w-full gap-2"
+          >
+            {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+            🎲 Tildel resterende hold
+          </Button>
+          <Button
+            onClick={() => void handleResetGame()}
+            disabled={loading}
+            variant="destructive"
+            className="w-full"
+          >
+            {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+            Nulstil dette spil
+          </Button>
+        </div>
 
         <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4">
           <h2 className="text-sm font-semibold text-white">Spillere i dette spil</h2>

@@ -12,6 +12,15 @@ import {
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
+const STAGES = [
+  { key: "group",          label: "Gruppe" },
+  { key: "round_of_32",   label: "1/16" },
+  { key: "round_of_16",   label: "1/8" },
+  { key: "quarter_final", label: "KV" },
+  { key: "semi_final",    label: "SF" },
+  { key: "final",         label: "Finale" },
+];
+
 type Me = {
   id: string;
   name: string;
@@ -19,14 +28,69 @@ type Me = {
   points: number;
 };
 
+type TeamRow = { name: string; points: number };
+
 type Row = { id: string; name: string; points: number; coins: number };
+
+type MatchRow = {
+  home_team: string;
+  away_team: string;
+  stage: string;
+  home_score: number | null;
+  away_score: number | null;
+  result_type: string | null;
+  status: string;
+};
+
+function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
+  let total = 0;
+  for (const stage of STAGES) {
+    const ms = matches.filter(
+      (m) =>
+        m.stage === stage.key &&
+        m.status === "finished" &&
+        (m.home_team === teamName || m.away_team === teamName),
+    );
+    for (const m of ms) {
+      const hs = m.home_score ?? 0;
+      const as_ = m.away_score ?? 0;
+      const isHome = m.home_team === teamName;
+      const myScore = isHome ? hs : as_;
+      const opScore = isHome ? as_ : hs;
+      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
+      const won = myScore > opScore;
+      const lost = myScore < opScore;
+
+      if (stage.key === "group") {
+        if (hs === as_) total += 50;
+        else if (won) total += 150;
+      } else {
+        if (isET) {
+          total += 50;
+          if (won) total += 50;
+        } else if (won) {
+          total += 150;
+        }
+        if (lost) {
+          if (stage.key === "round_of_32") total += 100;
+          else if (stage.key === "round_of_16") total += 200;
+          else if (stage.key === "quarter_final") total += 400;
+          else if (stage.key === "semi_final") total += 600;
+          else if (stage.key === "final") total += 800;
+        }
+        if (stage.key === "final" && won) total += 1000;
+      }
+    }
+  }
+  return total;
+}
 
 export default function ScorePage() {
   const [gameId, setGameId] = useState<string | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [gameLabel, setGameLabel] = useState<string | null>(null);
   const [me, setMe] = useState<Me | null>(null);
-  const [myTeams, setMyTeams] = useState<string[]>([]);
+  const [myTeams, setMyTeams] = useState<TeamRow[]>([]);
   const [board, setBoard] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,13 +99,13 @@ export default function ScorePage() {
     setLoading(true);
     setError(null);
 
-    const [{ data: gameRow }, { data: self, error: selfErr }, { data: roster }, { data: all }] =
+    const [{ data: gameRow }, { data: self, error: selfErr }, { data: roster }, { data: all }, { data: matchData }] =
       await Promise.all([
         supabase.from("games").select("label,invite_code").eq("id", gid).maybeSingle(),
         supabase.from("players").select("id,name,coins,points,game_id").eq("id", pid).maybeSingle(),
         supabase
           .from("game_teams")
-          .select("team_id, teams(name)")
+          .select("team_id, teams(name, flag_emoji)")
           .eq("game_id", gid)
           .eq("owner_player_id", pid),
         supabase
@@ -50,6 +114,10 @@ export default function ScorePage() {
           .eq("game_id", gid)
           .order("points", { ascending: false })
           .order("name", { ascending: true }),
+        supabase
+          .from("wc_matches")
+          .select("home_team,away_team,stage,home_score,away_score,result_type,status")
+          .eq("game_id", gid),
       ]);
 
     setLoading(false);
@@ -86,13 +154,25 @@ export default function ScorePage() {
       points: Number(self.points),
     });
 
-    const names: string[] = [];
+    const matches: MatchRow[] = (matchData ?? []).map((m: Record<string, unknown>) => ({
+      home_team: String(m.home_team),
+      away_team: String(m.away_team),
+      stage: String(m.stage),
+      home_score: m.home_score != null ? Number(m.home_score) : null,
+      away_score: m.away_score != null ? Number(m.away_score) : null,
+      result_type: m.result_type ? String(m.result_type) : null,
+      status: String(m.status),
+    }));
+
+    const teams: TeamRow[] = [];
     for (const row of roster ?? []) {
-      const r = row as { teams?: { name?: string } | null };
+      const r = row as { teams?: { name?: string; flag_emoji?: string | null } | null };
       const nm = r.teams?.name;
-      if (nm) names.push(String(nm));
+      if (nm) {
+        teams.push({ name: String(nm), points: calcTeamPoints(String(nm), matches) });
+      }
     }
-    setMyTeams(names.sort((a, b) => a.localeCompare(b, "da")));
+    setMyTeams(teams.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, "da")));
 
     setBoard(
       (all ?? []).map((r) => ({
@@ -126,46 +206,14 @@ export default function ScorePage() {
     if (!gameId) return;
     const channel = supabase
       .channel(`score-board-${gameId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "players",
-          filter: `game_id=eq.${gameId}`,
-        },
-        () => {
-          if (playerId) void load(gameId, playerId);
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "game_teams",
-          filter: `game_id=eq.${gameId}`,
-        },
-        () => {
-          if (playerId) void load(gameId, playerId);
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "wc_matches",
-          filter: `game_id=eq.${gameId}`,
-        },
-        () => {
-          if (playerId) void load(gameId, playerId);
-        },
-      )
+      .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` },
+        () => { if (playerId) void load(gameId, playerId); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "game_teams", filter: `game_id=eq.${gameId}` },
+        () => { if (playerId) void load(gameId, playerId); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "wc_matches", filter: `game_id=eq.${gameId}` },
+        () => { if (playerId) void load(gameId, playerId); })
       .subscribe();
-    return () => {
-      void supabase.removeChannel(channel);
-    };
+    return () => { void supabase.removeChannel(channel); };
   }, [gameId, playerId, load]);
 
   if (!gameId || !playerId) {
@@ -220,6 +268,7 @@ export default function ScorePage() {
           <p className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">{error}</p>
         ) : me ? (
           <>
+            {/* ── Mig ── */}
             <section className="rounded-2xl border border-white/10 bg-slate-950/60 p-6 shadow-xl shadow-blue-950/30">
               <div className="flex items-start gap-3">
                 <User className="mt-0.5 size-5 text-slate-400" aria-hidden />
@@ -228,7 +277,7 @@ export default function ScorePage() {
                   <p className="mt-1 text-sm text-slate-400">Dig i dette spil</p>
                 </div>
               </div>
-              <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="mt-6 grid grid-cols-2 gap-3">
                 <div className="rounded-xl border border-white/10 bg-black/30 p-4">
                   <p className="text-xs uppercase tracking-wider text-slate-500">Turneringspoint</p>
                   <p className="mt-1 text-2xl font-bold tabular-nums text-amber-200">
@@ -241,16 +290,37 @@ export default function ScorePage() {
                     {me.coins.toLocaleString("da-DK")}
                   </p>
                 </div>
-                <div className="col-span-2 rounded-xl border border-white/10 bg-black/30 p-4 sm:col-span-1">
-                  <p className="text-xs uppercase tracking-wider text-slate-500">Hold i truppen</p>
-                  <p className="mt-1 text-sm text-slate-200">
-                    {myTeams.length ? myTeams.join(", ") : "Ingen endnu"}
-                  </p>
-                </div>
               </div>
             </section>
 
-            <section className="mt-8">
+            {/* ── Mine hold ── */}
+            <section className="mt-6 rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl shadow-blue-950/30">
+              <div className="border-b border-white/[0.08] px-5 py-4">
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Mine hold</h2>
+                <p className="mt-0.5 text-xs text-slate-500">{myTeams.length} hold · sorteret efter point</p>
+              </div>
+              {myTeams.length === 0 ? (
+                <p className="px-5 py-6 text-sm text-slate-500">Ingen hold endnu.</p>
+              ) : (
+                <ul className="divide-y divide-white/[0.06]">
+                  {myTeams.map((team) => (
+                    <li key={team.name} className="flex items-center justify-between gap-3 px-5 py-3">
+                      <span className="text-sm font-medium text-slate-200">{team.name}</span>
+                      {team.points > 0 ? (
+                        <span className="tabular-nums text-sm font-semibold text-amber-200">
+                          {team.points.toLocaleString("da-DK")} pt
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-600">0 pt</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {/* ── Rangliste ── */}
+            <section className="mt-6">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Rangliste</h2>
               <p className="mt-1 text-xs text-slate-500">
                 Opdateres live når værten registrerer kampresultater. Point beregnes automatisk ud fra dine holds præstationer.

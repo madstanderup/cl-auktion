@@ -38,6 +38,7 @@ type MatchRow = {
   home_score: number | null;
   away_score: number | null;
   result_type: string | null;
+  winner_side: string | null;
   status: string;
 };
 
@@ -47,39 +48,6 @@ type GameInfo = {
   auction_status: string | null;
 };
 
-// Compute points a team earned from a single match
-function matchPoints(teamName: string, match: MatchRow): number {
-  if (match.status !== "finished") return 0;
-  if (match.home_team !== teamName && match.away_team !== teamName) return 0;
-
-  const isHome = match.home_team === teamName;
-  const hs = match.home_score ?? 0;
-  const as_ = match.away_score ?? 0;
-
-  const stage = match.stage;
-  // Advancement bonus (team advanced to this stage)
-  let advancement = 0;
-  if (stage === "round_of_32") advancement = 100;
-  else if (stage === "round_of_16") advancement = 200;
-  else if (stage === "quarter_final") advancement = 400;
-  else if (stage === "semi_final") advancement = 600;
-  else if (stage === "final") advancement = 800;
-
-  let matchPts = 0;
-  if (hs === as_) {
-    matchPts = 50; // draw (group stage)
-  } else {
-    const won = isHome ? hs > as_ : as_ > hs;
-    if (won) {
-      if (match.result_type === "normal_time") matchPts = 150;
-      else matchPts = 50; // extra_time or penalties
-    }
-  }
-
-  // For non-group stages, winner bonus is already in advancement; just return match pts
-  // But we only add advancement once per team per stage — handled in matrix building
-  return matchPts + advancement;
-}
 
 export default function GameDashboard() {
   const params = useParams();
@@ -107,7 +75,7 @@ export default function GameDashboard() {
       supabase.from("game_teams")
         .select("team_id, owner_id, teams(id, name, flag_emoji), players(id, name)")
         .eq("game_id", gameId),
-      supabase.from("wc_matches").select("id, home_team, away_team, stage, home_score, away_score, result_type, status").eq("game_id", gameId),
+      supabase.from("wc_matches").select("id, home_team, away_team, stage, home_score, away_score, result_type, winner_side, status").eq("game_id", gameId),
       supabase.from("auction_state").select("status").eq("game_id", gameId).maybeSingle(),
     ]);
 
@@ -138,6 +106,7 @@ export default function GameDashboard() {
       home_score: m.home_score != null ? Number(m.home_score) : null,
       away_score: m.away_score != null ? Number(m.away_score) : null,
       result_type: m.result_type ? String(m.result_type) : null,
+      winner_side: m.winner_side ? String(m.winner_side) : null,
       status: String(m.status),
     }));
 
@@ -152,41 +121,58 @@ export default function GameDashboard() {
     setLoading(false);
   }
 
+  // Helper: is teamName the winner of this match?
+  function isWinner(m: MatchRow, teamName: string): boolean {
+    if (m.result_type === "normal_time") {
+      const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
+      return (m.home_team === teamName && hs > as_) || (m.away_team === teamName && as_ > hs);
+    }
+    return (m.winner_side === "home" && m.home_team === teamName) ||
+           (m.winner_side === "away" && m.away_team === teamName);
+  }
+  function isLoser(m: MatchRow, teamName: string): boolean {
+    const plays = m.home_team === teamName || m.away_team === teamName;
+    return plays && !isWinner(m, teamName);
+  }
+
   // Build a map: teamName -> stageKey -> total points
   const pointsMatrix = new Map<string, Map<string, number>>();
   for (const team of teams) {
     const stageMap = new Map<string, number>();
     for (const stage of STAGES) {
-      // For advancement bonus: only count once per team per stage (use first match of that stage)
       const stageMatches = matches.filter(
-        (m) => m.stage === stage.key && (m.home_team === team.name || m.away_team === team.name)
+        (m) => m.stage === stage.key &&
+               m.status === "finished" &&
+               (m.home_team === team.name || m.away_team === team.name)
       );
       let pts = 0;
-      let advancementCounted = false;
       for (const m of stageMatches) {
-        if (m.status !== "finished") continue;
-        const isHome = m.home_team === team.name;
-        const hs = m.home_score ?? 0;
-        const as_ = m.away_score ?? 0;
-        let matchPts = 0;
-        if (hs === as_) {
-          matchPts = 50;
+        const isET = m.result_type === "extra_time" || m.result_type === "penalties";
+        const won = isWinner(m, team.name);
+        const lost = isLoser(m, team.name);
+
+        // Match points
+        if (stage.key === "group") {
+          const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
+          if (hs === as_) pts += 50; // draw
+          else if (won) pts += 150;  // win normal time in group
         } else {
-          const won = isHome ? hs > as_ : as_ > hs;
-          if (won) {
-            matchPts = m.result_type === "normal_time" ? 150 : 50;
-          }
+          if (won) pts += 50;        // win ET/pen or normal time in knockout: 50
+          if (!won && isET) pts += 50; // loser in ET/pen got draw in normal time
+          if (won && m.result_type === "normal_time") pts += 100; // normal time win: 150 total
         }
-        // Advancement bonus once per stage
-        if (!advancementCounted && stage.key !== "group") {
-          if (stage.key === "round_of_32") matchPts += 100;
-          else if (stage.key === "round_of_16") matchPts += 200;
-          else if (stage.key === "quarter_final") matchPts += 400;
-          else if (stage.key === "semi_final") matchPts += 600;
-          else if (stage.key === "final") matchPts += 800;
-          advancementCounted = true;
+
+        // Advancement bonus: loser gets it
+        if (stage.key !== "group" && lost) {
+          if (stage.key === "round_of_32") pts += 100;
+          else if (stage.key === "round_of_16") pts += 200;
+          else if (stage.key === "quarter_final") pts += 400;
+          else if (stage.key === "semi_final") pts += 600;
+          else if (stage.key === "final") pts += 800;
         }
-        pts += matchPts;
+
+        // Tournament winner: +1000
+        if (stage.key === "final" && won) pts += 1000;
       }
       stageMap.set(stage.key, pts);
     }

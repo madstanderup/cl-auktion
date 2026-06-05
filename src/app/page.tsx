@@ -206,8 +206,8 @@ export default function Home() {
 
       router.push("/auction");
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Uventet fejl ved oprettelse af spiller.";
-      alert(message);
+      const message = e instanceof Error ? e.message : String(e);
+      alert(`Fejl: ${message}`);
     } finally {
       setIsSaving(false);
     }

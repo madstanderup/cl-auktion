@@ -125,50 +125,47 @@ export default function AuctionAdminPage() {
   const [resultForms, setResultForms] = useState<Record<string, { home: string; away: string; type: string }>>({});
   const [resultLoading, setResultLoading] = useState<string | null>(null);
 
+  async function restoreSessionFromDB(): Promise<boolean> {
+    const supabaseClient = createClient();
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) return false;
+    const { data: game } = await supabaseClient
+      .from("games")
+      .select("id, invite_code, label, admin_secret")
+      .eq("created_by", user.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (game?.id && game.admin_secret) {
+      const s: GameAdminSession = {
+        gameId: String(game.id),
+        adminSecret: String(game.admin_secret),
+        inviteCode: String(game.invite_code),
+        label: game.label ? String(game.label) : null,
+      };
+      writeAdminSession(s);
+      setSession(s);
+      return true;
+    }
+    return false;
+  }
+
   useEffect(() => {
     void (async () => {
       const supabaseClient = createClient();
       const stored = readAdminSession();
 
       if (stored) {
-        // Verify the stored game still exists
         const { data } = await supabaseClient.from("games").select("id").eq("id", stored.gameId).maybeSingle();
         if (data?.id) {
           setSession(stored);
           setSessionReady(true);
           return;
         }
-        // Game no longer exists — clear stale session
         localStorage.removeItem(GAME_ADMIN_SESSION_KEY);
-        setMessage("Det tidligere spil findes ikke længere. Opret et nyt.");
       }
 
-      // No valid localStorage session — check if logged-in user owns a game
-      const { data: { user }, error: userErr } = await supabaseClient.auth.getUser();
-      console.log("[admin] auth user:", user?.id, userErr?.message);
-      if (user) {
-        const { data: game, error: gameErr } = await supabaseClient
-          .from("games")
-          .select("id, invite_code, label, admin_secret")
-          .eq("created_by", user.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        console.log("[admin] game from DB:", game?.id, "admin_secret present:", !!game?.admin_secret, "error:", gameErr?.message);
-
-        if (game?.id && game.admin_secret) {
-          const s: GameAdminSession = {
-            gameId: String(game.id),
-            adminSecret: String(game.admin_secret),
-            inviteCode: String(game.invite_code),
-            label: game.label ? String(game.label) : null,
-          };
-          writeAdminSession(s);
-          setSession(s);
-        }
-      }
-
+      await restoreSessionFromDB();
       setSessionReady(true);
     })();
   }, []);
@@ -354,19 +351,18 @@ export default function AuctionAdminPage() {
     }
   }
 
-  function handleLeaveAdmin() {
+  async function handleLeaveAdmin() {
     localStorage.removeItem(GAME_ADMIN_SESSION_KEY);
     try {
       localStorage.removeItem(PLAYER_GAME_ID_KEY);
       localStorage.removeItem(PLAYER_ID_KEY);
       localStorage.removeItem(PLAYER_NAME_KEY);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
     setSession(null);
     setState(null);
     setPlayers([]);
-    setMessage("Du er logget ud som vært på denne browser.");
+    // Try to restore from DB (in case user is logged in as owner)
+    await restoreSessionFromDB();
   }
 
   async function rpcArgs() {
@@ -686,7 +682,6 @@ export default function AuctionAdminPage() {
   }
 
   if (!session) {
-    console.log("[admin] rendering: no session — showing create form");
     return (
       <div className="min-h-screen bg-[#030711] px-4 py-10 text-slate-100">
         <div className="mx-auto w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/40 backdrop-blur">

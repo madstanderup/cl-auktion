@@ -153,9 +153,11 @@ export default function GameDashboard() {
           if (hs === as_) pts += 50; // draw
           else if (won) pts += 150;  // win normal time in group
         } else {
-          if (won) pts += 50;        // win ET/pen or normal time in knockout: 50
-          if (!won && isET) pts += 50; // loser in ET/pen got draw in normal time
-          if (won && m.result_type === "normal_time") pts += 100; // normal time win: 150 total
+          if (isET) {
+            pts += 100; // both teams get 100 when match goes to ET/pen (50 draw + 50 bonus)
+          } else if (won) {
+            pts += 150; // win normal time in knockout
+          }
         }
 
         // Advancement bonus: loser gets it

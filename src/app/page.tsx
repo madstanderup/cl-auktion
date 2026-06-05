@@ -143,12 +143,7 @@ export default function Home() {
       localStorage.setItem(PLAYER_NAME_KEY, game.player_name);
       localStorage.setItem(PLAYER_GAME_ID_KEY, game.game_id);
     } catch { /* ignore */ }
-    const isActive = game.auction_status && game.auction_status !== "finished";
-    if (isActive) {
-      router.push("/auction");
-    } else {
-      router.push(`/game/${game.game_id}`);
-    }
+    router.push(`/game/${game.game_id}`);
   }
 
   async function handleGoToAuction() {
@@ -204,7 +199,7 @@ export default function Home() {
         localStorage.setItem(PLAYER_GAME_ID_KEY, gameId);
       } catch { /* ignore */ }
 
-      router.push("/auction");
+      router.push(`/game/${gameId}`);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       alert(`Fejl: ${message}`);

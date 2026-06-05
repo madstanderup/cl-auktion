@@ -611,12 +611,14 @@ export default function AuctionPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Link
-              href="/score"
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
-            >
-              Stilling
-            </Link>
+            {gameId && (
+              <Link
+                href={`/game/${gameId}`}
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
+              >
+                ← Spil
+              </Link>
+            )}
             {gameId && (
               <Link
                 href={`/game/${gameId}/points`}

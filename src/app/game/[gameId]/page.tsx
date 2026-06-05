@@ -2,332 +2,307 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Trophy, Users } from "lucide-react";
+import { ArrowLeft, Gavel, Loader2, ShieldCheck, Trophy, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import {
+  GAME_ADMIN_SESSION_KEY,
+  PLAYER_GAME_ID_KEY,
+  PLAYER_ID_KEY,
+} from "@/lib/player-storage";
 
 const STAGES = [
-  { key: "group",         label: "Gruppe" },
-  { key: "round_of_32",  label: "1/16" },
-  { key: "round_of_16",  label: "1/8" },
-  { key: "quarter_final",label: "KV" },
-  { key: "semi_final",   label: "SF" },
-  { key: "final",        label: "Finale" },
+  { key: "group",          label: "Gruppe" },
+  { key: "round_of_32",   label: "1/16" },
+  { key: "round_of_16",   label: "1/8" },
+  { key: "quarter_final", label: "KV" },
+  { key: "semi_final",    label: "SF" },
+  { key: "final",         label: "Finale" },
 ];
 
-type Player = {
-  id: string;
-  name: string;
-  coins: number;
-  points: number;
-};
-
-type Team = {
-  id: string;
-  name: string;
-  flag_emoji: string | null;
-  owner_id: string | null;
-  owner_name: string | null;
-};
-
+type Player = { id: string; name: string; coins: number; points: number };
 type MatchRow = {
-  id: string;
-  home_team: string;
-  away_team: string;
-  stage: string;
-  home_score: number | null;
-  away_score: number | null;
-  result_type: string | null;
-  winner_side: string | null;
-  status: string;
+  home_team: string; away_team: string; stage: string;
+  home_score: number | null; away_score: number | null;
+  result_type: string | null; status: string;
 };
 
-type GameInfo = {
-  label: string | null;
-  invite_code: string;
-  auction_status: string | null;
-};
+function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
+  let total = 0;
+  for (const stage of STAGES) {
+    const ms = matches.filter(
+      (m) => m.stage === stage.key && m.status === "finished" &&
+        (m.home_team === teamName || m.away_team === teamName),
+    );
+    for (const m of ms) {
+      const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
+      const isHome = m.home_team === teamName;
+      const myScore = isHome ? hs : as_, opScore = isHome ? as_ : hs;
+      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
+      const won = myScore > opScore, lost = myScore < opScore;
+      if (stage.key === "group") {
+        if (hs === as_) total += 50;
+        else if (won) total += 150;
+      } else {
+        if (isET) { total += 50; if (won) total += 50; }
+        else if (won) total += 150;
+        if (lost) {
+          if (stage.key === "round_of_32") total += 100;
+          else if (stage.key === "round_of_16") total += 200;
+          else if (stage.key === "quarter_final") total += 400;
+          else if (stage.key === "semi_final") total += 600;
+          else if (stage.key === "final") total += 800;
+        }
+        if (stage.key === "final" && won) total += 1000;
+      }
+    }
+  }
+  return total;
+}
 
-
-export default function GameDashboard() {
+export default function GamePage() {
   const params = useParams();
   const router = useRouter();
   const gameId = params.gameId as string;
 
-  const [gameInfo, setGameInfo] = useState<GameInfo | null>(null);
+  const [gameLabel, setGameLabel] = useState<string>("");
+  const [auctionStatus, setAuctionStatus] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [matches, setMatches] = useState<MatchRow[]>([]);
+  const [myTeams, setMyTeams] = useState<{ name: string; points: number }[]>([]);
+  const [myPlayer, setMyPlayer] = useState<Player | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     if (!gameId) return;
-    void loadAll();
+
+    // Sync localStorage so auction/score pages work if user navigates there
+    try {
+      localStorage.setItem(PLAYER_GAME_ID_KEY, gameId);
+    } catch { /* ignore */ }
+
+    // Check if this user is admin for this game
+    try {
+      const raw = localStorage.getItem(GAME_ADMIN_SESSION_KEY);
+      if (raw) {
+        const o = JSON.parse(raw) as { gameId?: string };
+        setIsAdmin(o.gameId === gameId);
+      }
+    } catch { /* ignore */ }
+
+    void load();
   }, [gameId]);
 
-  async function loadAll() {
+  async function load() {
     setLoading(true);
-    const supabase = createClient();
 
-    const [gameRes, playersRes, teamsRes, matchesRes, auctionRes] = await Promise.all([
+    // Get current player from localStorage
+    let myPlayerId: string | null = null;
+    try { myPlayerId = localStorage.getItem(PLAYER_ID_KEY); } catch { /* ignore */ }
+
+    const [gameRes, playersRes, auctionRes, matchesRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("players").select("id, name, coins, points").eq("game_id", gameId).order("points", { ascending: false }),
-      supabase.from("game_teams")
-        .select("team_id, owner_id, teams(id, name, flag_emoji), players(id, name)")
-        .eq("game_id", gameId),
-      supabase.from("wc_matches").select("id, home_team, away_team, stage, home_score, away_score, result_type, winner_side, status").eq("game_id", gameId),
       supabase.from("auction_state").select("status").eq("game_id", gameId).maybeSingle(),
+      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,status").eq("game_id", gameId),
     ]);
 
+    const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
+    setGameLabel(g?.label ?? g?.invite_code ?? "Spil");
+    setAuctionStatus((auctionRes.data as { status?: string } | null)?.status ?? null);
+
     const playerList: Player[] = (playersRes.data ?? []).map((p: Record<string, unknown>) => ({
-      id: String(p.id),
-      name: String(p.name),
-      coins: Number(p.coins),
-      points: Number(p.points),
+      id: String(p.id), name: String(p.name), coins: Number(p.coins), points: Number(p.points),
     }));
+    setPlayers(playerList);
 
-    const teamList: Team[] = (teamsRes.data ?? []).map((gt: Record<string, unknown>) => {
-      const t = gt.teams as { id: string; name: string; flag_emoji: string | null } | null;
-      const owner = gt.players as { id: string; name: string } | null;
-      return {
-        id: t?.id ?? String(gt.team_id),
-        name: t?.name ?? "?",
-        flag_emoji: t?.flag_emoji ?? null,
-        owner_id: owner?.id ?? (gt.owner_id ? String(gt.owner_id) : null),
-        owner_name: owner?.name ?? null,
-      };
-    });
+    const me = myPlayerId ? playerList.find((p) => p.id === myPlayerId) ?? null : null;
+    setMyPlayer(me);
 
-    const matchList: MatchRow[] = (matchesRes.data ?? []).map((m: Record<string, unknown>) => ({
-      id: String(m.id),
-      home_team: String(m.home_team),
-      away_team: String(m.away_team),
-      stage: String(m.stage),
+    const matches: MatchRow[] = (matchesRes.data ?? []).map((m: Record<string, unknown>) => ({
+      home_team: String(m.home_team), away_team: String(m.away_team), stage: String(m.stage),
       home_score: m.home_score != null ? Number(m.home_score) : null,
       away_score: m.away_score != null ? Number(m.away_score) : null,
       result_type: m.result_type ? String(m.result_type) : null,
-      winner_side: m.winner_side ? String(m.winner_side) : null,
       status: String(m.status),
     }));
 
-    setPlayers(playerList);
-    setTeams(teamList);
-    setMatches(matchList);
-    setGameInfo({
-      label: (gameRes.data as { label?: string | null } | null)?.label ?? null,
-      invite_code: (gameRes.data as { invite_code?: string } | null)?.invite_code ?? "",
-      auction_status: (auctionRes.data as { status?: string } | null)?.status ?? null,
-    });
+    // Two-step team fetch to avoid FK join issues
+    if (myPlayerId) {
+      const { data: gtRows } = await supabase
+        .from("game_teams")
+        .select("team_id")
+        .eq("game_id", gameId)
+        .eq("owner_player_id", myPlayerId);
+
+      const teamIds = (gtRows ?? []).map((r: Record<string, unknown>) => String(r.team_id));
+      if (teamIds.length > 0) {
+        const { data: teamRows } = await supabase
+          .from("teams")
+          .select("id, name")
+          .in("id", teamIds);
+
+        const teams = (teamRows ?? []).map((t: Record<string, unknown>) => ({
+          name: String(t.name),
+          points: calcTeamPoints(String(t.name), matches),
+        }));
+        setMyTeams(teams.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, "da")));
+      } else {
+        setMyTeams([]);
+      }
+    }
+
     setLoading(false);
   }
 
-  // Helper: winner always determined by score (ET/pen score reflects actual winner)
-  function isWinner(m: MatchRow, teamName: string): boolean {
-    const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
-    return (m.home_team === teamName && hs > as_) || (m.away_team === teamName && as_ > hs);
-  }
-  function isLoser(m: MatchRow, teamName: string): boolean {
-    const plays = m.home_team === teamName || m.away_team === teamName;
-    return plays && !isWinner(m, teamName);
-  }
-
-  // Build a map: teamName -> stageKey -> total points
-  const pointsMatrix = new Map<string, Map<string, number>>();
-  for (const team of teams) {
-    const stageMap = new Map<string, number>();
-    for (const stage of STAGES) {
-      const stageMatches = matches.filter(
-        (m) => m.stage === stage.key &&
-               m.status === "finished" &&
-               (m.home_team === team.name || m.away_team === team.name)
-      );
-      let pts = 0;
-      for (const m of stageMatches) {
-        const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-        const won = isWinner(m, team.name);
-        const lost = isLoser(m, team.name);
-
-        // Match points
-        if (stage.key === "group") {
-          const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
-          if (hs === as_) pts += 50; // draw
-          else if (won) pts += 150;  // win normal time in group
-        } else {
-          if (isET) {
-            pts += 50; // begge hold: 50 for uafgjort i ordinær tid
-            if (won) pts += 50; // kun vinderen: 50 bonus for at vinde i ET/straffe
-          } else if (won) {
-            pts += 150; // win normal time in knockout
-          }
-        }
-
-        // Advancement bonus: loser gets it
-        if (stage.key !== "group" && lost) {
-          if (stage.key === "round_of_32") pts += 100;
-          else if (stage.key === "round_of_16") pts += 200;
-          else if (stage.key === "quarter_final") pts += 400;
-          else if (stage.key === "semi_final") pts += 600;
-          else if (stage.key === "final") pts += 800;
-        }
-
-        // Tournament winner: +1000
-        if (stage.key === "final" && won) pts += 1000;
-      }
-      stageMap.set(stage.key, pts);
-    }
-    pointsMatrix.set(team.name, stageMap);
-  }
-
-  const gameName = gameInfo?.label ?? (gameInfo ? `Spil ${gameInfo.invite_code}` : "Spil");
-  const isActive = gameInfo?.auction_status && gameInfo.auction_status !== "finished";
+  const isAuctionActive = auctionStatus && auctionStatus !== "finished";
 
   return (
     <div className="min-h-screen bg-[#030711] text-slate-100">
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {/* Header */}
-        <div className="mb-8 flex flex-wrap items-center gap-4">
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors"
-          >
-            <ArrowLeft className="size-4" />
-            Forsiden
-          </button>
-          <div className="flex-1">
-            <h1 className="text-xl font-semibold tracking-tight text-white">{gameName}</h1>
-            {gameInfo && (
-              <p className="mt-0.5 text-xs text-slate-500">
-                Kode: <span className="font-mono tracking-wider text-slate-400">{gameInfo.invite_code}</span>
-                {isActive && (
-                  <span className="ml-3 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-medium text-emerald-300">
-                    <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Auktion igangværende
-                  </span>
-                )}
-              </p>
-            )}
-          </div>
-          {isActive && (
+      <header className="border-b border-white/[0.08] bg-slate-950/40 px-4 py-4 backdrop-blur-md sm:px-6">
+        <div className="mx-auto flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => router.push("/auction")}
-              className="rounded-lg border border-amber-400/30 bg-gradient-to-r from-amber-300 via-amber-200 to-amber-300 px-4 py-2 text-sm font-semibold text-slate-950 shadow transition hover:from-amber-200 hover:to-amber-200"
+              onClick={() => router.push("/")}
+              className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors"
             >
-              Gå til Auktion →
+              <ArrowLeft className="size-4" />
+              Forsiden
             </button>
-          )}
+            <div className="h-4 w-px bg-white/10" />
+            <div>
+              <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-500">Spil</p>
+              <p className="text-sm font-medium text-white">{gameLabel}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {isAuctionActive && (
+              <Link
+                href="/auction"
+                className={cn(buttonVariants({ size: "sm" }), "bg-amber-400 text-slate-950 hover:bg-amber-300 font-semibold text-xs")}
+              >
+                <Gavel className="size-3.5 mr-1" />
+                Auktion
+              </Link>
+            )}
+            <Link
+              href={`/game/${gameId}/points`}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
+            >
+              <Trophy className="size-3.5 mr-1" />
+              Pointoversigt
+            </Link>
+            {isAdmin && (
+              <Link
+                href="/auction/admin"
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
+              >
+                <ShieldCheck className="size-3.5 mr-1" />
+                Admin
+              </Link>
+            )}
+          </div>
         </div>
+      </header>
 
+      <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
         {loading ? (
           <div className="flex justify-center py-24">
             <Loader2 className="size-8 animate-spin text-amber-400/60" />
           </div>
         ) : (
-          <div className="space-y-8">
-            {/* ── Standings ── */}
-            <section className="rounded-2xl border border-white/[0.08] bg-slate-950/55 shadow-xl backdrop-blur-md">
-              <div className="flex items-center gap-2 border-b border-white/[0.08] px-5 py-4">
-                <Users className="size-4 text-blue-400/80" aria-hidden />
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Stilling</h2>
-              </div>
-              {players.length === 0 ? (
-                <p className="px-5 py-6 text-sm text-slate-500">Ingen spillere endnu.</p>
-              ) : (
-                <ul className="divide-y divide-white/[0.06]">
-                  {players.map((p, i) => (
-                    <li key={p.id} className="flex items-center gap-4 px-5 py-3">
-                      <span className={cn(
-                        "w-6 text-center text-sm font-bold",
-                        i === 0 ? "text-amber-300" : i === 1 ? "text-slate-300" : i === 2 ? "text-amber-600" : "text-slate-600"
-                      )}>
-                        {i + 1}
-                      </span>
-                      <span className="flex-1 truncate text-sm font-medium text-white">{p.name}</span>
-                      <span className="text-sm font-semibold text-amber-200/90">{p.points} pt</span>
-                      <span className="text-xs text-slate-500">{p.coins} 🪙</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+          <div className="space-y-6">
 
-            {/* ── Team × Stage matrix ── */}
-            <section className="rounded-2xl border border-white/[0.08] bg-slate-950/55 shadow-xl backdrop-blur-md">
-              <div className="flex items-center gap-2 border-b border-white/[0.08] px-5 py-4">
-                <Trophy className="size-4 text-amber-400/90" aria-hidden />
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Hold × Runde point</h2>
-              </div>
-
-              {teams.length === 0 ? (
-                <p className="px-5 py-6 text-sm text-slate-500">Ingen hold i dette spil endnu.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-max border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-white/[0.08]">
-                        <th className="sticky left-0 z-10 bg-slate-950/90 px-4 py-3 text-left text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500">
-                          Hold
-                        </th>
-                        <th className="px-3 py-3 text-left text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500">
-                          Ejer
-                        </th>
-                        {STAGES.map((s) => (
-                          <th key={s.key} className="px-3 py-3 text-center text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500">
-                            {s.label}
-                          </th>
-                        ))}
-                        <th className="px-3 py-3 text-center text-[0.65rem] font-semibold uppercase tracking-wider text-amber-500/80">
-                          Total
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[0.04]">
-                      {teams
-                        .slice()
-                        .sort((a, b) => {
-                          const aTotal = [...(pointsMatrix.get(a.name)?.values() ?? [])].reduce((s, v) => s + v, 0);
-                          const bTotal = [...(pointsMatrix.get(b.name)?.values() ?? [])].reduce((s, v) => s + v, 0);
-                          return bTotal - aTotal;
-                        })
-                        .map((team) => {
-                          const stageMap = pointsMatrix.get(team.name);
-                          const total = [...(stageMap?.values() ?? [])].reduce((s, v) => s + v, 0);
-                          return (
-                            <tr key={team.id} className="hover:bg-white/[0.02] transition-colors">
-                              <td className="sticky left-0 z-10 bg-slate-950/90 px-4 py-2.5 font-medium text-slate-200 whitespace-nowrap">
-                                {team.flag_emoji && <span className="mr-1.5">{team.flag_emoji}</span>}
-                                {team.name}
-                              </td>
-                              <td className="px-3 py-2.5 text-slate-500 whitespace-nowrap">
-                                {team.owner_name ?? <span className="text-slate-700">—</span>}
-                              </td>
-                              {STAGES.map((s) => {
-                                const pts = stageMap?.get(s.key) ?? 0;
-                                return (
-                                  <td key={s.key} className="px-3 py-2.5 text-center">
-                                    {pts > 0 ? (
-                                      <span className="font-semibold text-amber-200/90">{pts}</span>
-                                    ) : (
-                                      <span className="text-slate-700">—</span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                              <td className="px-3 py-2.5 text-center font-bold text-amber-300">
-                                {total > 0 ? total : <span className="text-slate-700">0</span>}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                    </tbody>
-                  </table>
+            {/* ── Min info ── */}
+            {myPlayer && (
+              <section className="rounded-2xl border border-white/10 bg-slate-950/60 p-6 shadow-xl shadow-blue-950/30">
+                <p className="text-lg font-semibold text-white">{myPlayer.name}</p>
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                    <p className="text-xs uppercase tracking-wider text-slate-500">Turneringspoint</p>
+                    <p className="mt-1 text-2xl font-bold tabular-nums text-amber-200">
+                      {myPlayer.points.toLocaleString("da-DK")}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                    <p className="text-xs uppercase tracking-wider text-slate-500">Mønter tilbage</p>
+                    <p className="mt-1 text-2xl font-bold tabular-nums text-slate-100">
+                      {myPlayer.coins.toLocaleString("da-DK")}
+                    </p>
+                  </div>
                 </div>
-              )}
+              </section>
+            )}
+
+            {/* ── Mine hold ── */}
+            {myPlayer && (
+              <section className="rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl shadow-blue-950/30">
+                <div className="border-b border-white/[0.08] px-5 py-4 flex items-center gap-2">
+                  <Trophy className="size-4 text-amber-400/80" />
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Mine hold</h2>
+                  <span className="ml-auto text-xs text-slate-500">{myTeams.length} hold</span>
+                </div>
+                {myTeams.length === 0 ? (
+                  <p className="px-5 py-6 text-sm text-slate-500">Ingen hold endnu.</p>
+                ) : (
+                  <ul className="divide-y divide-white/[0.06]">
+                    {myTeams.map((team) => (
+                      <li key={team.name} className="flex items-center justify-between gap-3 px-5 py-3">
+                        <span className="text-sm font-medium text-slate-200">{team.name}</span>
+                        {team.points > 0 ? (
+                          <span className="tabular-nums text-sm font-semibold text-amber-200">
+                            {team.points.toLocaleString("da-DK")} pt
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-600">0 pt</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
+
+            {/* ── Rangliste ── */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Users className="size-4 text-blue-400/80" />
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Rangliste</h2>
+              </div>
+              <ul className="divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-950/50">
+                {players.map((p, idx) => (
+                  <li
+                    key={p.id}
+                    className={cn(
+                      "flex items-center justify-between gap-3 px-4 py-3 text-sm",
+                      p.id === myPlayer?.id && "bg-amber-500/10",
+                    )}
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className={cn(
+                        "w-6 shrink-0 text-center font-mono text-xs",
+                        idx === 0 ? "text-amber-300 font-bold" : idx === 1 ? "text-slate-300" : idx === 2 ? "text-amber-600" : "text-slate-600"
+                      )}>
+                        {idx + 1}
+                      </span>
+                      <span className="truncate font-medium text-white">{p.name}</span>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="tabular-nums font-semibold text-amber-200">{p.points.toLocaleString("da-DK")} pt</span>
+                      <span className="text-xs text-slate-500">{p.coins} 🪙</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </section>
+
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 }

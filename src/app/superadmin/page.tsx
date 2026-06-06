@@ -40,14 +40,22 @@ export default function SuperAdminPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [currentEmail, setCurrentEmail] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
     void supabase.auth.getUser().then(({ data: { user } }) => {
-      setCurrentEmail(user?.email ?? null);
+      const email = user?.email ?? "";
+      setCurrentEmail(email);
+      setAuthChecked(true);
+      if (email === SUPERADMIN_EMAIL) {
+        void loadUsers();
+        void loadGames();
+      } else {
+        setLoading(false);
+        setGamesLoading(false);
+      }
     });
-    void loadUsers();
-    void loadGames();
   }, []);
 
   async function loadUsers() {
@@ -190,7 +198,15 @@ export default function SuperAdminPage() {
     void loadGames();
   }
 
-  if (currentEmail !== null && currentEmail !== SUPERADMIN_EMAIL) {
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-600">
+        <Loader2 className="size-6 animate-spin" />
+      </div>
+    );
+  }
+
+  if (currentEmail !== SUPERADMIN_EMAIL) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-400">
         Ingen adgang.

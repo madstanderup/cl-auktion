@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, Loader2, Plus, ShieldCheck, Trash2, Trophy } from "lucide-react";
+import { Copy, Loader2, Plus, ShieldCheck, Trash2, Trophy, XCircle } from "lucide-react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -674,6 +674,23 @@ export default function AuctionAdminPage() {
     }
   }
 
+  async function handleFinishAuction() {
+    if (!session) return;
+    if (!window.confirm("Er du sikker på at du vil afslutte auktionen? Status sættes til 'finished'.")) return;
+    setMessage(null);
+    try {
+      const { error } = await supabase
+        .from("auction_state")
+        .update({ status: "finished" })
+        .eq("game_id", session.gameId);
+      if (error) { setMessage(`Fejl: ${error.message}`); return; }
+      setMessage("Auktionen er afsluttet.");
+      void loadState(session.gameId);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Ukendt fejl.");
+    }
+  }
+
   if (!sessionReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-100">
@@ -908,6 +925,17 @@ export default function AuctionAdminPage() {
             <span className="text-white">{state?.tie_break_min_bid ?? "—"}</span>
           </p>
         </div>
+
+        {state?.status !== "finished" && (
+          <Button
+            variant="outline"
+            className="mt-4 w-full border-red-500/40 text-red-300 hover:bg-red-500/10 hover:text-red-200"
+            onClick={() => void handleFinishAuction()}
+          >
+            <XCircle className="size-4 mr-2" />
+            Afslut auktion
+          </Button>
+        )}
 
         {message ? (
           <p className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">

@@ -214,6 +214,12 @@ export default function GamePage() {
                 Admin
               </Link>
             )}
+            <Link
+              href="/regler"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
+            >
+              📖 Regler
+            </Link>
           </div>
         </div>
       </header>

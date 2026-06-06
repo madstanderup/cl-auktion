@@ -102,6 +102,11 @@ export default function LoginPage() {
               Opret konto
             </Link>
           </p>
+          <p className="mt-3 text-center text-xs text-slate-600">
+            <Link href="/regler" className="text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors">
+              Læs regler & beskrivelse
+            </Link>
+          </p>
         </div>
       </div>
     </div>

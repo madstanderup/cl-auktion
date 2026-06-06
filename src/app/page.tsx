@@ -268,6 +268,15 @@ export default function Home() {
           pointene gennem hele turneringen.
         </p>
 
+        <div className="mt-4 flex justify-center">
+          <Link
+            href="/regler"
+            className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-500/10 px-4 py-1.5 text-xs font-medium text-amber-200/90 hover:bg-amber-500/20 transition-colors"
+          >
+            📖 Læs regler &amp; beskrivelse
+          </Link>
+        </div>
+
         {/* Two-column layout on desktop */}
         <div className="mt-10 flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
 

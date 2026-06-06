@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+// Sider der ikke kræver login
 const PUBLIC_PATHS = ["/login", "/register", "/auth/confirm", "/regler"];
+// Sider logget-ind brugere sendes væk fra (fx login/register)
+const AUTH_ONLY_PATHS = ["/login", "/register"];
 
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -26,6 +29,7 @@ export async function proxy(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   const pathname = request.nextUrl.pathname;
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+  const isAuthOnly = AUTH_ONLY_PATHS.some((p) => pathname.startsWith(p));
 
   // Ikke logget ind → send til /login (undtagen offentlige sider)
   if (!user && !isPublic) {
@@ -34,8 +38,8 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Allerede logget ind → send væk fra login/register
-  if (user && isPublic) {
+  // Allerede logget ind → send væk fra login/register (men ikke fra /regler o.l.)
+  if (user && isAuthOnly) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 

@@ -23,6 +23,8 @@ type GameRow = {
   auction_status: string | null;
 };
 
+const SUPERADMIN_EMAIL = "madstanderup@gmail.com";
+
 const AUCTION_STATUS_LABEL: Record<string, { label: string; color: string }> = {
   waiting:  { label: "Venter på spillere", color: "text-slate-400 bg-slate-700/40" },
   bidding:  { label: "Auktion igangværende", color: "text-emerald-300 bg-emerald-500/15" },
@@ -186,6 +188,14 @@ export default function SuperAdminPage() {
   function refreshAll() {
     void loadUsers();
     void loadGames();
+  }
+
+  if (currentEmail !== null && currentEmail !== SUPERADMIN_EMAIL) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-400">
+        Ingen adgang.
+      </div>
+    );
   }
 
   return (

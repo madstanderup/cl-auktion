@@ -31,15 +31,10 @@ export default function ReglerPage() {
           </div>
           <div className="space-y-3 text-sm leading-relaxed text-slate-300">
             <p>
-              Forestil dig at du og dine venner er sportsdirektører med hver jeres budget — og hele VM-slutrunden er til salg.
-              I en fælles auktion byder I om kap på alle 48 landshold. Vinder du buddet på et hold, bliver det dit, og du scorer point hver gang det klarer sig godt i turneringen.
+              Dyst i fodboldviden og forudsigelser igennem en auktion, hvor det gælder om at samle point efter hvordan dine hold klarer sig — alle 48 hold bliver fordelt igennem en auktion hvor hver spiller har 1.000 mønter. Der bydes blindt på holdene, og den der byder mest får holdet og bliver fratrukket sine mønter. Holdene allokerer derefter point til den enkelte spiller, baseret på de enkelte kampe og på hvor langt de når i turneringen.
             </p>
             <p>
-              Strategien er todelt: køb hold du tror rækker langt i turneringen, men pas på ikke at bruge alle dine mønter på ét enkelt hold — for du har brug for en bred trup der scorer point i alle runder.
-            </p>
-            <p>
-              Det sjove? Selv taberne er guld værd. Et hold der når kvartfinalen men taber der, giver dig stadig et kæmpe point-boost — så du kan sagtens vinde spillet uden finaleholdet.
-              Den spiller der samler flest point fra alle sine hold tilsammen, vinder.
+              Strategien er todelt: køb hold du tror rækker langt i turneringen — sats enten på mange hold der scorer lidt point, eller få hold der scorer mange point.
             </p>
           </div>
         </section>

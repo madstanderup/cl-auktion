@@ -98,7 +98,7 @@ export default function ReglerPage() {
                     <span className="font-bold text-amber-300">+150 pt</span>
                   </div>
                   <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                    <span>Kamp til forlænget/straffe (begge hold)</span>
+                    <span>Uafgjort i ordinær spilletid (begge hold)</span>
                     <span className="font-bold text-amber-300">+50 pt</span>
                   </div>
                   <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
@@ -146,7 +146,7 @@ export default function ReglerPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Eksempel — England vinder finalen på straffe mod Egypten (1-1 e.f.t.)</p>
                 <div className="space-y-1.5 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-slate-300">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England — forlænget/straffe (begge)</span>
+                    <span className="text-slate-300">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England — uafgjort i ordinær spilletid (begge)</span>
                     <span className="text-amber-200">+50 pt</span>
                   </div>
                   <div className="flex justify-between">
@@ -163,7 +163,7 @@ export default function ReglerPage() {
                   </div>
                   <div className="border-t border-white/10 pt-1.5 mt-1.5 space-y-1.5">
                     <div className="flex justify-between">
-                      <span className="text-slate-300">🇪🇬 Egypten — forlænget/straffe (begge)</span>
+                      <span className="text-slate-300">🇪🇬 Egypten — uafgjort i ordinær spilletid (begge)</span>
                       <span className="text-amber-200">+50 pt</span>
                     </div>
                     <div className="flex justify-between">

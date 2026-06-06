@@ -679,11 +679,16 @@ export default function AuctionAdminPage() {
     if (!window.confirm("Er du sikker på at du vil afslutte auktionen? Status sættes til 'finished'.")) return;
     setMessage(null);
     try {
-      const { error } = await supabase
-        .from("auction_state")
-        .update({ status: "finished" })
-        .eq("game_id", session.gameId);
+      const { data, error } = await withTimeout(
+        supabase.rpc("admin_finish_auction", {
+          p_game_id:      session.gameId,
+          p_admin_secret: session.adminSecret,
+        }),
+        "Afslutning af auktion",
+      );
       if (error) { setMessage(`Fejl: ${error.message}`); return; }
+      const payload = data as { ok?: boolean; error?: string };
+      if (!payload?.ok) { setMessage(payload?.error ?? "Fejl."); return; }
       setMessage("Auktionen er afsluttet.");
       void loadState(session.gameId);
     } catch (err) {

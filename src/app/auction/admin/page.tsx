@@ -108,6 +108,7 @@ export default function AuctionAdminPage() {
   const [session, setSession] = useState<GameAdminSession | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [newGameLabel, setNewGameLabel] = useState("");
+  const [newPlayerName, setNewPlayerName] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [myGames, setMyGames] = useState<{ id: string; label: string | null; invite_code: string; admin_secret: string }[]>([]);
@@ -346,6 +347,25 @@ export default function AuctionAdminPage() {
         label: payload.label ?? null,
       };
       writeAdminSession(next);
+
+      // Opret admin som spiller hvis navn er angivet
+      const trimmedName = newPlayerName.trim();
+      if (trimmedName) {
+        try {
+          const { data: { user } } = await authClient.auth.getUser();
+          const row: Record<string, unknown> = { name: trimmedName, coins: 1000, points: 0, game_id: next.gameId };
+          if (user?.id) row.user_id = user.id;
+          const { data: playerData, error: playerErr } = await authClient
+            .from("players").insert([row]).select("id").single();
+          if (!playerErr && playerData?.id) {
+            try {
+              localStorage.setItem(PLAYER_ID_KEY, String(playerData.id));
+              localStorage.setItem(PLAYER_NAME_KEY, trimmedName);
+            } catch { /* ignore */ }
+          }
+        } catch { /* ignore — spillet er stadig oprettet */ }
+      }
+
       try {
         localStorage.setItem(PLAYER_GAME_ID_KEY, next.gameId);
       } catch {
@@ -748,7 +768,17 @@ export default function AuctionAdminPage() {
                   Du får en invitationskode du kan dele. Hvert spil har sin egen auktion og spillere.
                 </p>
               )}
-              <label htmlFor="game-label" className="block text-xs font-medium text-slate-400">
+              <label htmlFor="player-name" className="block text-xs font-medium text-slate-400">
+                Dit spillernavn
+              </label>
+              <Input
+                id="player-name"
+                value={newPlayerName}
+                onChange={(e) => setNewPlayerName(e.target.value)}
+                placeholder="Fx. Mads"
+                className="mt-2 h-11 border-white/15 bg-white/[0.06] text-white"
+              />
+              <label htmlFor="game-label" className="block text-xs font-medium text-slate-400 mt-4">
                 Navn på spillet (valgfrit)
               </label>
               <Input
@@ -761,7 +791,7 @@ export default function AuctionAdminPage() {
               <Button
                 type="button"
                 className="mt-4 w-full gap-2"
-                disabled={loading}
+                disabled={loading || !newPlayerName.trim()}
                 onClick={() => void handleCreateGame()}
               >
                 {loading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}

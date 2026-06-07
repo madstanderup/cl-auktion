@@ -16,6 +16,8 @@ function ConfirmInner() {
 
   useEffect(() => {
     const code = searchParams.get("code");
+    const tokenHash = searchParams.get("token_hash");
+    const type = searchParams.get("type");
     const errorParam = searchParams.get("error_description") ?? searchParams.get("error");
 
     if (errorParam) {
@@ -24,31 +26,46 @@ function ConfirmInner() {
       return;
     }
 
-    if (!code) {
-      // Might be hash-based flow — check hash
-      const hash = window.location.hash;
-      if (hash.includes("access_token")) {
-        // Supabase implicit flow — session is set automatically by the client
-        setStatus("success");
-        setTimeout(() => router.push("/"), 3000);
-      } else {
-        setErrorMsg("Ingen bekræftelseskode fundet. Prøv at registrere dig igen.");
-        setStatus("error");
-      }
+    const supabase = createClient();
+
+    // OTP / email-bekræftelse flow (token_hash + type)
+    if (tokenHash && type) {
+      void supabase.auth.verifyOtp({ token_hash: tokenHash, type: type as "email" | "signup" | "magiclink" | "recovery" }).then(({ error }) => {
+        if (error) {
+          setErrorMsg(error.message);
+          setStatus("error");
+        } else {
+          setStatus("success");
+          setTimeout(() => router.push("/"), 3000);
+        }
+      });
       return;
     }
 
     // PKCE flow — exchange code for session
-    const supabase = createClient();
-    void supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
-      if (error) {
-        setErrorMsg(error.message);
-        setStatus("error");
-      } else {
-        setStatus("success");
-        setTimeout(() => router.push("/"), 3000);
-      }
-    });
+    if (code) {
+      void supabase.auth.exchangeCodeForSession(code).then(({ error }) => {
+        if (error) {
+          setErrorMsg(error.message);
+          setStatus("error");
+        } else {
+          setStatus("success");
+          setTimeout(() => router.push("/"), 3000);
+        }
+      });
+      return;
+    }
+
+    // Implicit / hash-based flow
+    const hash = window.location.hash;
+    if (hash.includes("access_token")) {
+      setStatus("success");
+      setTimeout(() => router.push("/"), 3000);
+      return;
+    }
+
+    setErrorMsg("Ingen bekræftelseskode fundet. Prøv at registrere dig igen.");
+    setStatus("error");
   }, [router, searchParams]);
 
   return (

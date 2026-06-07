@@ -445,16 +445,40 @@ export default function AuctionPage() {
   useEffect(() => {
     if (!victoryBannerActive || !gameId) return;
     const roundInfo = lastRoundRef.current;
-    if (!roundInfo) return;
     let cancelled = false;
     (async () => {
-      const { data: bidsData } = await supabase
-        .from("auction_room_bids")
-        .select("player_id, amount")
-        .eq("game_id", gameId)
-        .eq("round_id", roundInfo.round)
-        .eq("bid_phase", roundInfo.phase)
-        .order("amount", { ascending: false });
+      let bidsData: { player_id: unknown; amount: unknown }[] | null = null;
+
+      if (roundInfo) {
+        // Vi kender runden — hent præcis de bud
+        const { data } = await supabase
+          .from("auction_room_bids")
+          .select("player_id, amount")
+          .eq("game_id", gameId)
+          .eq("round_id", roundInfo.round)
+          .eq("bid_phase", roundInfo.phase)
+          .order("amount", { ascending: false });
+        bidsData = data;
+      } else {
+        // Siden blev åbnet mens banneret allerede var aktivt — hent seneste runde
+        const { data: latestRound } = await supabase
+          .from("auction_room_bids")
+          .select("round_id, bid_phase")
+          .eq("game_id", gameId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (latestRound) {
+          const { data } = await supabase
+            .from("auction_room_bids")
+            .select("player_id, amount")
+            .eq("game_id", gameId)
+            .eq("round_id", String(latestRound.round_id))
+            .eq("bid_phase", Number(latestRound.bid_phase))
+            .order("amount", { ascending: false });
+          bidsData = data;
+        }
+      }
 
       if (!bidsData?.length || cancelled) return;
 

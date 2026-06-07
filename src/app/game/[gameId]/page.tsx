@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Gavel, Loader2, ShieldCheck, Trophy, Users } from "lucide-react";
+import { ArrowLeft, Gavel, Loader2, ShieldCheck, Table2, Trophy, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import {
   PLAYER_GAME_ID_KEY,
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
+import { TableIcon } from "lucide-react";
 
 const STAGES = [
   { key: "group",          label: "Gruppe" },
@@ -214,6 +215,13 @@ export default function GamePage() {
                 Admin
               </Link>
             )}
+            <Link
+              href={`/game/${gameId}/bids`}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
+            >
+              <Table2 className="size-3.5 mr-1" />
+              Budoversigt
+            </Link>
             <Link
               href="/regler"
               className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}

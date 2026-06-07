@@ -861,8 +861,18 @@ export default function AuctionAdminPage() {
           Del koden med spillere — de indtaster den på forsiden sammen med deres navn.
         </p>
 
-        <div className="mt-6 grid gap-3 sm:grid-cols-2">
-          <Button onClick={() => void handleDrawNextTeam()} disabled={loading}>
+        {state?.status === "tie_breaker" && (
+          <div className="mt-6 rounded-xl border border-orange-400/30 bg-orange-500/10 px-4 py-3 text-sm text-orange-200">
+            🔁 <span className="font-semibold">Om-auktion i gang</span> — vent på at de tiede spillere byder igen, og afslør derefter.
+          </div>
+        )}
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Button
+            onClick={() => void handleDrawNextTeam()}
+            disabled={loading || state?.status === "tie_breaker" || state?.status === "bidding"}
+            title={state?.status === "tie_breaker" ? "Om-auktion er i gang — afslør først vinderen" : undefined}
+          >
             {loading ? <Loader2 className="size-4 animate-spin" /> : null}
             Træk næste hold
           </Button>

@@ -393,13 +393,15 @@ export default function AuctionPage() {
       setRebidOpen(false);
       setBidSuccessMsg(null);
       setBidAmount("");
+      // Opdater møntbalancen når runden skifter (vinderen har fået fratrukket mønter i DB)
+      if (player?.id && gameId) void loadPlayer(player.id, gameId);
     }
     // Gem aktiv runde så vi kan hente bud efter den nulstilles
     if (auction.current_round_id) {
       lastRoundRef.current = { round: auction.current_round_id, phase: auction.current_phase };
     }
     prevRoundRef.current = { round: auction.current_round_id, phase: auction.current_phase };
-  }, [auction]);
+  }, [auction, player?.id, gameId, loadPlayer]);
 
   useEffect(() => {
     if (!player?.id || !auction?.current_round_id || !gameId) return;

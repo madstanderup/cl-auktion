@@ -397,8 +397,6 @@ export default function AuctionPage() {
       setRebidOpen(false);
       setBidSuccessMsg(null);
       setBidAmount("");
-      // Ryd seneste resultat når ny runde trækkes
-      if (prev.round !== auction.current_round_id) setLastResult(null);
       // Opdater møntbalancen når runden skifter (vinderen har fået fratrukket mønter i DB)
       if (player?.id && gameId) void loadPlayer(player.id, gameId);
     }
@@ -725,8 +723,8 @@ export default function AuctionPage() {
           </div>
         ) : null}
 
-        {/* Seneste resultat — vises persistent indtil næste hold trækkes */}
-        {!victoryBannerActive && lastResult && (
+        {/* Seneste resultat — vises persistent indtil næste resultat erstatter det */}
+        {!victoryBannerActive && lastResult && lastResult.bids.length > 0 && (
           <div className="mb-4 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-4">
             <p className="text-[0.65rem] font-semibold uppercase tracking-widest text-slate-500 mb-2">Seneste resultat</p>
             <div className="flex items-center justify-between mb-3">

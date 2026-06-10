@@ -66,6 +66,10 @@ export default function AuctionPage() {
   const [ownershipSummary, setOwnershipSummary] = useState<PlayerOwnershipSummary[]>([]);
   const [victoryTick, setVictoryTick] = useState(0);
   const [revealedBids, setRevealedBids] = useState<{ playerName: string; amount: number }[]>([]);
+  const [lastResult, setLastResult] = useState<{
+    teamName: string; winnerName: string; winningBid: number;
+    bids: { playerName: string; amount: number }[];
+  } | null>(null);
 
   const prevRoundRef = useRef<{ round: string | null; phase: number } | null>(null);
   // Gemmer sidste aktive runde så vi kan hente bud selv efter round_id nulstilles
@@ -393,6 +397,8 @@ export default function AuctionPage() {
       setRebidOpen(false);
       setBidSuccessMsg(null);
       setBidAmount("");
+      // Ryd seneste resultat når ny runde trækkes
+      if (prev.round !== auction.current_round_id) setLastResult(null);
       // Opdater møntbalancen når runden skifter (vinderen har fået fratrukket mønter i DB)
       if (player?.id && gameId) void loadPlayer(player.id, gameId);
     }
@@ -500,14 +506,24 @@ export default function AuctionPage() {
         if (!latestByPlayer.has(pid)) latestByPlayer.set(pid, Number(b.amount));
       }
 
-      setRevealedBids(
-        [...latestByPlayer.entries()]
-          .map(([pid, amount]) => ({ playerName: nameById.get(pid) ?? "?", amount }))
-          .sort((a, b) => b.amount - a.amount),
-      );
+      const sortedBids = [...latestByPlayer.entries()]
+        .map(([pid, amount]) => ({ playerName: nameById.get(pid) ?? "?", amount }))
+        .sort((a, b) => b.amount - a.amount);
+
+      setRevealedBids(sortedBids);
+
+      // Gem resultatet persistent så det vises selv efter banneret forsvinder
+      if (auction?.resolution_team_name && auction.resolution_winner_name) {
+        setLastResult({
+          teamName: auction.resolution_team_name,
+          winnerName: auction.resolution_winner_name,
+          winningBid: auction.resolution_winning_bid ?? 0,
+          bids: sortedBids,
+        });
+      }
     })();
     return () => { cancelled = true; };
-  }, [victoryBannerActive, gameId]);
+  }, [victoryBannerActive, gameId, auction?.resolution_team_name, auction?.resolution_winner_name, auction?.resolution_winning_bid]);
 
   const victorySecondsLeft = useMemo(() => {
     if (!auction?.resolution_until) return 0;
@@ -708,6 +724,38 @@ export default function AuctionPage() {
             </p>
           </div>
         ) : null}
+
+        {/* Seneste resultat — vises persistent indtil næste hold trækkes */}
+        {!victoryBannerActive && lastResult && (
+          <div className="mb-4 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-4">
+            <p className="text-[0.65rem] font-semibold uppercase tracking-widest text-slate-500 mb-2">Seneste resultat</p>
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-semibold text-white">{lastResult.teamName}</span>
+              <span className="text-sm text-slate-300">
+                → <span className="font-semibold text-amber-200">{lastResult.winnerName}</span>
+                <span className="ml-2 tabular-nums text-amber-300/80">{lastResult.winningBid.toLocaleString("da-DK")} 🪙</span>
+              </span>
+            </div>
+            {lastResult.bids.length > 0 && (
+              <ul className="space-y-1 border-t border-white/[0.07] pt-2">
+                {lastResult.bids.map((b) => (
+                  <li key={b.playerName} className="flex items-center justify-between text-sm">
+                    <span className={cn(
+                      "font-medium",
+                      b.playerName === lastResult.winnerName ? "text-amber-200" : "text-slate-400"
+                    )}>
+                      {b.playerName === lastResult.winnerName ? "👑 " : ""}{b.playerName}
+                    </span>
+                    <span className={cn(
+                      "tabular-nums",
+                      b.playerName === lastResult.winnerName ? "font-bold text-amber-200" : "text-slate-500"
+                    )}>{b.amount.toLocaleString("da-DK")}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {auctionFinished ? (
           <div className="mb-4 w-full rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-center">

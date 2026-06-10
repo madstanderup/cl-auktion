@@ -74,6 +74,8 @@ export default function AuctionPage() {
   const prevRoundRef = useRef<{ round: string | null; phase: number } | null>(null);
   // Gemmer sidste aktive runde så vi kan hente bud selv efter round_id nulstilles
   const lastRoundRef = useRef<{ round: string; phase: number } | null>(null);
+  // Bruges til at undgå dobbelt-fetch af samme runde
+  const lastSavedResultRoundRef = useRef<string | null>(null);
 
   useEffect(() => {
     try {
@@ -212,6 +214,72 @@ export default function AuctionPage() {
     setOwnershipSummary(summary);
   }, []);
 
+  // Henter bud for en afgjort runde og gemmer dem i lastResult + revealedBids.
+  // Kaldes direkte fra realtime-callback så React-batching ikke kan forhindre det.
+  const fetchAndSaveResult = useCallback(async (
+    teamName: string,
+    winnerName: string,
+    winningBid: number,
+    gid: string,
+    roundKey: string, // round_id brugt til dedup
+  ) => {
+    // Undgå dobbelt-fetch for samme runde
+    if (lastSavedResultRoundRef.current === roundKey) return;
+    lastSavedResultRoundRef.current = roundKey;
+
+    const roundInfo = lastRoundRef.current;
+    let bidsData: { player_id: unknown; amount: unknown }[] | null = null;
+
+    if (roundInfo) {
+      const { data } = await supabase
+        .from("auction_room_bids")
+        .select("player_id, amount")
+        .eq("game_id", gid)
+        .eq("round_id", roundInfo.round)
+        .eq("bid_phase", roundInfo.phase)
+        .order("amount", { ascending: false });
+      bidsData = data;
+    } else {
+      // Fallback: seneste runde i DB
+      const { data: latestRound } = await supabase
+        .from("auction_room_bids")
+        .select("round_id, bid_phase")
+        .eq("game_id", gid)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestRound) {
+        const { data } = await supabase
+          .from("auction_room_bids")
+          .select("player_id, amount")
+          .eq("game_id", gid)
+          .eq("round_id", String(latestRound.round_id))
+          .eq("bid_phase", Number(latestRound.bid_phase))
+          .order("amount", { ascending: false });
+        bidsData = data;
+      }
+    }
+
+    if (!bidsData?.length) return;
+
+    const playerIds = [...new Set(bidsData.map((b) => String(b.player_id)))];
+    const { data: playersData } = await supabase.from("players").select("id,name").in("id", playerIds);
+    const nameById = new Map((playersData ?? []).map((p) => [String(p.id), String(p.name)]));
+
+    const latestByPlayer = new Map<string, number>();
+    for (const b of bidsData) {
+      const pid = String(b.player_id);
+      if (!latestByPlayer.has(pid)) latestByPlayer.set(pid, Number(b.amount));
+    }
+
+    const sortedBids = [...latestByPlayer.entries()]
+      .map(([pid, amount]) => ({ playerName: nameById.get(pid) ?? "?", amount }))
+      .sort((a, b) => b.amount - a.amount);
+
+    setRevealedBids(sortedBids);
+    setLastResult({ teamName, winnerName, winningBid, bids: sortedBids });
+  }, []);
+
   useEffect(() => {
     if (!playerId || !gameId) {
       setPlayerLoading(false);
@@ -298,14 +366,29 @@ export default function AuctionPage() {
         },
         (payload) => {
           const next = payload.new as Record<string, unknown> | null;
-          if (next && typeof next === "object" && "id" in next) applyAuctionRow(next);
+          if (!next || typeof next !== "object" || !("id" in next)) return;
+          applyAuctionRow(next);
+          // Hent bud DIREKTE fra realtime-callback (omgår React 18 batching)
+          // Selv hvis admin trækker næste hold med det samme, har vi allerede sat lastResult.
+          if (next.resolution_winner_name && next.resolution_team_name) {
+            // Brug round_id fra den forrige aktive runde (gemt i lastRoundRef)
+            // som dedup-nøgle — eller timestamp hvis ref er null
+            const dedupKey = lastRoundRef.current?.round ?? String(next.resolution_until ?? Date.now());
+            void fetchAndSaveResult(
+              String(next.resolution_team_name),
+              String(next.resolution_winner_name),
+              Number(next.resolution_winning_bid ?? 0),
+              gameId,
+              dedupKey,
+            );
+          }
         },
       )
       .subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [applyAuctionRow, gameId]);
+  }, [applyAuctionRow, fetchAndSaveResult, gameId]);
 
   useEffect(() => {
     if (!gameId) return;
@@ -360,9 +443,9 @@ export default function AuctionPage() {
   }, [auction?.tied_player_ids, playerId]);
 
   const minBid = useMemo(() => {
-    if (!auction) return 1;
-    if (auction.status === "tie_breaker") return Math.max(auction.tie_break_min_bid ?? 1, 1);
-    return 1;
+    if (!auction) return 0;
+    if (auction.status === "tie_breaker") return Math.max(auction.tie_break_min_bid ?? 0, 0);
+    return 0;
   }, [auction]);
 
   useEffect(() => {
@@ -387,6 +470,10 @@ export default function AuctionPage() {
 
   useEffect(() => {
     if (!auction) return;
+    // Gem aktiv runde ALTID (også ved første render) så bud-fetch kan finde den
+    if (auction.current_round_id) {
+      lastRoundRef.current = { round: auction.current_round_id, phase: auction.current_phase };
+    }
     const prev = prevRoundRef.current;
     if (!prev) {
       prevRoundRef.current = { round: auction.current_round_id, phase: auction.current_phase };
@@ -399,10 +486,6 @@ export default function AuctionPage() {
       setBidAmount("");
       // Opdater møntbalancen når runden skifter (vinderen har fået fratrukket mønter i DB)
       if (player?.id && gameId) void loadPlayer(player.id, gameId);
-    }
-    // Gem aktiv runde så vi kan hente bud efter den nulstilles
-    if (auction.current_round_id) {
-      lastRoundRef.current = { round: auction.current_round_id, phase: auction.current_phase };
     }
     prevRoundRef.current = { round: auction.current_round_id, phase: auction.current_phase };
   }, [auction, player?.id, gameId, loadPlayer]);
@@ -486,7 +569,7 @@ export default function AuctionPage() {
         }
       }
 
-      if (!bidsData?.length || cancelled) return;
+      if (!bidsData?.length) return;
 
       const playerIds = [...new Set(bidsData.map((b) => String(b.player_id)))];
       const { data: playersData } = await supabase
@@ -494,7 +577,6 @@ export default function AuctionPage() {
         .select("id,name")
         .in("id", playerIds);
 
-      if (cancelled) return;
       const nameById = new Map((playersData ?? []).map((p) => [String(p.id), String(p.name)]));
 
       // Seneste bud pr. spiller (højest ved flere bud fra samme)
@@ -508,9 +590,11 @@ export default function AuctionPage() {
         .map(([pid, amount]) => ({ playerName: nameById.get(pid) ?? "?", amount }))
         .sort((a, b) => b.amount - a.amount);
 
-      setRevealedBids(sortedBids);
+      // Opdater kun den levende banner hvis vi stadig er aktive
+      if (!cancelled) setRevealedBids(sortedBids);
 
-      // Gem resultatet persistent så det vises selv efter banneret forsvinder
+      // Gem resultatet persistent — sættes ALTID, selv hvis banneret allerede er forsvundet
+      // (auction er fanget i closure fra det render hvor effekten kørte — har stadig resolution-data)
       if (auction?.resolution_team_name && auction.resolution_winner_name) {
         setLastResult({
           teamName: auction.resolution_team_name,
@@ -540,7 +624,7 @@ export default function AuctionPage() {
     }
 
     const amount = Number.parseInt(bidAmount.trim(), 10);
-    if (!Number.isFinite(amount) || amount < minBid) {
+    if (!Number.isFinite(amount) || amount < minBid || amount < 0) {
       alert(`Indtast et heltal på mindst ${minBid}.`);
       return;
     }
@@ -968,7 +1052,7 @@ export default function AuctionPage() {
                       disabled={
                         bidSubmitting ||
                         !player ||
-                        !bidAmount ||
+                        bidAmount === "" ||
                         Number(bidAmount) < minBid ||
                         Number(bidAmount) > (player?.coins ?? 0)
                       }

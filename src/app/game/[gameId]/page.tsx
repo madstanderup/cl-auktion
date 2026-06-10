@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Gavel, Loader2, ShieldCheck, Table2, Trophy, Users } from "lucide-react";
+import { ArrowLeft, Gavel, Loader2, ShieldCheck, Table2, TrendingUp, Trophy, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,6 @@ import {
   PLAYER_GAME_ID_KEY,
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
-import { TableIcon } from "lucide-react";
 
 const STAGES = [
   { key: "group",          label: "Gruppe" },
@@ -30,6 +29,7 @@ type MatchRow = {
   home_score: number | null; away_score: number | null;
   result_type: string | null; winner_side: string | null; status: string;
 };
+type PlayerTeams = { player: Player; teams: { name: string; points: number }[] };
 
 function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
   let total = 0;
@@ -43,7 +43,6 @@ function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
       const isHome = m.home_team === teamName;
       const myScore = isHome ? hs : as_, opScore = isHome ? as_ : hs;
       const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-      // For penalties with tied score, use winner_side to determine won/lost
       let won: boolean, lost: boolean;
       if (m.result_type === "penalties" && m.winner_side) {
         won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
@@ -80,7 +79,7 @@ export default function GamePage() {
   const [gameLabel, setGameLabel] = useState<string>("");
   const [auctionStatus, setAuctionStatus] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
-  const [myTeams, setMyTeams] = useState<{ name: string; points: number }[]>([]);
+  const [allPlayerTeams, setAllPlayerTeams] = useState<PlayerTeams[]>([]);
   const [myPlayer, setMyPlayer] = useState<Player | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -88,12 +87,8 @@ export default function GamePage() {
   useEffect(() => {
     if (!gameId) return;
 
-    // Sync localStorage so auction/score pages work if user navigates there
-    try {
-      localStorage.setItem(PLAYER_GAME_ID_KEY, gameId);
-    } catch { /* ignore */ }
+    try { localStorage.setItem(PLAYER_GAME_ID_KEY, gameId); } catch { /* ignore */ }
 
-    // Check if this user is admin for this game
     try {
       const raw = localStorage.getItem(GAME_ADMIN_SESSION_KEY);
       if (raw) {
@@ -108,15 +103,15 @@ export default function GamePage() {
   async function load() {
     setLoading(true);
 
-    // Get current player from localStorage
     let myPlayerId: string | null = null;
     try { myPlayerId = localStorage.getItem(PLAYER_ID_KEY); } catch { /* ignore */ }
 
-    const [gameRes, playersRes, auctionRes, matchesRes] = await Promise.all([
+    const [gameRes, playersRes, auctionRes, matchesRes, gtRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("players").select("id, name, coins, points").eq("game_id", gameId).order("points", { ascending: false }),
       supabase.from("auction_state").select("status").eq("game_id", gameId).maybeSingle(),
       supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").eq("game_id", gameId),
+      supabase.from("game_teams").select("team_id, owner_player_id").eq("game_id", gameId).not("owner_player_id", "is", null),
     ]);
 
     const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
@@ -140,40 +135,42 @@ export default function GamePage() {
       status: String(m.status),
     }));
 
-    // Two-step team fetch to avoid FK join issues
-    if (myPlayerId) {
-      const { data: gtRows } = await supabase
-        .from("game_teams")
-        .select("team_id")
-        .eq("game_id", gameId)
-        .eq("owner_player_id", myPlayerId);
-
-      const teamIds = (gtRows ?? []).map((r: Record<string, unknown>) => String(r.team_id));
-      if (teamIds.length > 0) {
-        const { data: teamRows } = await supabase
-          .from("teams")
-          .select("id, name")
-          .in("id", teamIds);
-
-        const teams = (teamRows ?? []).map((t: Record<string, unknown>) => ({
-          name: String(t.name),
-          points: calcTeamPoints(String(t.name), matches),
-        }));
-        setMyTeams(teams.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, "da")));
-      } else {
-        setMyTeams([]);
-      }
+    // Hent holdnavne for alle ejede hold
+    const teamIds = [...new Set((gtRes.data ?? []).map((r: Record<string, unknown>) => String(r.team_id)))];
+    let teamNameById = new Map<string, string>();
+    if (teamIds.length > 0) {
+      const { data: teamRows } = await supabase.from("teams").select("id, name").in("id", teamIds);
+      teamNameById = new Map((teamRows ?? []).map((t: Record<string, unknown>) => [String(t.id), String(t.name)]));
     }
+
+    // Byg: playerId → teams
+    const teamsByOwner = new Map<string, { name: string; points: number }[]>();
+    for (const row of (gtRes.data ?? []) as Record<string, unknown>[]) {
+      const pid = String(row.owner_player_id);
+      const tname = teamNameById.get(String(row.team_id));
+      if (!tname) continue;
+      const arr = teamsByOwner.get(pid) ?? [];
+      arr.push({ name: tname, points: calcTeamPoints(tname, matches) });
+      teamsByOwner.set(pid, arr);
+    }
+
+    // Sortér hold per spiller: point desc, derefter navn
+    const allPT: PlayerTeams[] = playerList.map((p) => ({
+      player: p,
+      teams: (teamsByOwner.get(p.id) ?? []).sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, "da")),
+    }));
+    setAllPlayerTeams(allPT);
 
     setLoading(false);
   }
 
   const isAuctionActive = auctionStatus && auctionStatus !== "finished";
+  const maxTeams = Math.max(...allPlayerTeams.map((pt) => pt.teams.length), 0);
 
   return (
     <div className="min-h-screen bg-[#030711] text-slate-100">
       <header className="border-b border-white/[0.08] bg-slate-950/40 px-4 py-4 backdrop-blur-md sm:px-6">
-        <div className="mx-auto flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex max-w-5xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -223,6 +220,13 @@ export default function GamePage() {
               Budoversigt
             </Link>
             <Link
+              href={`/game/${gameId}/prediction`}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
+            >
+              <TrendingUp className="size-3.5 mr-1" />
+              Prediction
+            </Link>
+            <Link
               href="/regler"
               className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
             >
@@ -232,7 +236,7 @@ export default function GamePage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
+      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
         {loading ? (
           <div className="flex justify-center py-24">
             <Loader2 className="size-8 animate-spin text-amber-400/60" />
@@ -261,32 +265,74 @@ export default function GamePage() {
               </section>
             )}
 
-            {/* ── Mine hold ── */}
-            {myPlayer && (
+            {/* ── Alle spilleres hold ── */}
+            {allPlayerTeams.some((pt) => pt.teams.length > 0) && (
               <section className="rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl shadow-blue-950/30">
                 <div className="border-b border-white/[0.08] px-5 py-4 flex items-center gap-2">
                   <Trophy className="size-4 text-amber-400/80" />
-                  <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Mine hold</h2>
-                  <span className="ml-auto text-xs text-slate-500">{myTeams.length} hold</span>
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-300">Hold</h2>
                 </div>
-                {myTeams.length === 0 ? (
-                  <p className="px-5 py-6 text-sm text-slate-500">Ingen hold endnu.</p>
-                ) : (
-                  <ul className="divide-y divide-white/[0.06]">
-                    {myTeams.map((team) => (
-                      <li key={team.name} className="flex items-center justify-between gap-3 px-5 py-3">
-                        <span className="text-sm font-medium text-slate-200">{team.name}</span>
-                        {team.points > 0 ? (
-                          <span className="tabular-nums text-sm font-semibold text-amber-200">
-                            {team.points.toLocaleString("da-DK")} pt
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-600">0 pt</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-white/[0.06]">
+                        {allPlayerTeams.map((pt) => (
+                          <th
+                            key={pt.player.id}
+                            className={cn(
+                              "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider",
+                              pt.player.id === myPlayer?.id
+                                ? "text-amber-300"
+                                : "text-slate-400"
+                            )}
+                          >
+                            <div>{pt.player.name}</div>
+                            <div className={cn(
+                              "mt-0.5 font-normal normal-case tracking-normal",
+                              pt.player.id === myPlayer?.id ? "text-amber-400/60" : "text-slate-600"
+                            )}>
+                              {pt.teams.length} hold
+                            </div>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04]">
+                      {Array.from({ length: maxTeams }).map((_, rowIdx) => (
+                        <tr key={rowIdx} className="hover:bg-white/[0.02]">
+                          {allPlayerTeams.map((pt) => {
+                            const team = pt.teams[rowIdx];
+                            return (
+                              <td
+                                key={pt.player.id}
+                                className={cn(
+                                  "px-4 py-2.5 align-top",
+                                  pt.player.id === myPlayer?.id && "bg-amber-500/[0.04]"
+                                )}
+                              >
+                                {team ? (
+                                  <div className="flex items-center justify-between gap-2 min-w-[130px]">
+                                    <span className={cn(
+                                      "font-medium truncate",
+                                      pt.player.id === myPlayer?.id ? "text-slate-100" : "text-slate-300"
+                                    )}>
+                                      {team.name}
+                                    </span>
+                                    {team.points > 0 && (
+                                      <span className="shrink-0 tabular-nums text-xs text-amber-300/80">
+                                        {team.points.toLocaleString("da-DK")}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </section>
             )}
 

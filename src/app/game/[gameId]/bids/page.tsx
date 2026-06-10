@@ -108,11 +108,14 @@ export default function BidsPage() {
       };
     });
 
+    // Vis kun afsluttede runder (holdet har fået en ejer = vinder er fundet)
+    const finishedEntries = roundEntries.filter((r) => r.winnerPlayerId !== null);
+
     // Sort by first bid timestamp = draw order
-    roundEntries.sort((a, b) => a.firstBidAt.localeCompare(b.firstBidAt));
+    finishedEntries.sort((a, b) => a.firstBidAt.localeCompare(b.firstBidAt));
 
     setRounds(
-      roundEntries.map((r, i) => ({
+      finishedEntries.map((r, i) => ({
         order: i + 1,
         roundId: r.roundId,
         teamName: r.teamName,

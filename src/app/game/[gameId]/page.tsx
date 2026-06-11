@@ -29,7 +29,17 @@ type MatchRow = {
   home_score: number | null; away_score: number | null;
   result_type: string | null; winner_side: string | null; status: string;
 };
-type PlayerTeams = { player: Player; teams: { name: string; points: number }[] };
+type PlayerTeams = { player: Player; teams: { name: string; points: number; pricePaid: number }[] };
+
+function roiLabel(points: number, bid: number): string | null {
+  if (bid <= 0) return points > 0 ? "∞" : null;
+  return (points / bid).toFixed(1) + "x";
+}
+function roiColor(points: number, bid: number): string {
+  if (bid <= 0) return "text-slate-500";
+  const r = points / bid;
+  return r >= 1 ? "text-emerald-400" : r >= 0.5 ? "text-amber-400" : "text-red-400";
+}
 
 function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
   let total = 0;
@@ -106,12 +116,13 @@ export default function GamePage() {
     let myPlayerId: string | null = null;
     try { myPlayerId = localStorage.getItem(PLAYER_ID_KEY); } catch { /* ignore */ }
 
-    const [gameRes, playersRes, auctionRes, matchesRes, gtRes] = await Promise.all([
+    const [gameRes, playersRes, auctionRes, matchesRes, gtRes, bidsRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("players").select("id, name, coins, points").eq("game_id", gameId).order("points", { ascending: false }),
       supabase.from("auction_state").select("status").eq("game_id", gameId).maybeSingle(),
       supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").eq("game_id", gameId),
       supabase.from("game_teams").select("team_id, owner_player_id").eq("game_id", gameId).not("owner_player_id", "is", null),
+      supabase.from("auction_room_bids").select("player_id, team_name, amount, bid_phase, created_at").eq("game_id", gameId).order("bid_phase", { ascending: false }).order("created_at", { ascending: false }),
     ]);
 
     const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
@@ -143,14 +154,32 @@ export default function GamePage() {
       teamNameById = new Map((teamRows ?? []).map((t: Record<string, unknown>) => [String(t.id), String(t.name)]));
     }
 
+    // Vinderbud pr. holdnavn: første forekomst (sorteret bid_phase DESC, created_at DESC)
+    const paidByTeam = new Map<string, number>();
+    for (const b of (bidsRes.data ?? []) as { player_id: string; team_name: string; amount: number }[]) {
+      if (!paidByTeam.has(b.team_name)) paidByTeam.set(b.team_name, b.amount);
+    }
+    // Map ejer → hold → vinderbud
+    const winnerBidByTeam = new Map<string, number>(); // teamName → bid paid by owner
+    for (const row of (gtRes.data ?? []) as Record<string, unknown>[]) {
+      const pid = String(row.owner_player_id);
+      const tname = teamNameById.get(String(row.team_id));
+      if (!tname) continue;
+      // Find the bid the owner placed (the winning bid)
+      const bid = (bidsRes.data ?? []) as { player_id: string; team_name: string; amount: number; bid_phase: number }[];
+      const ownerBids = bid.filter((b) => b.team_name === tname && b.player_id === pid);
+      const winBid = ownerBids.length > 0 ? Math.max(...ownerBids.map((b) => b.amount)) : 0;
+      winnerBidByTeam.set(`${pid}|${tname}`, winBid);
+    }
+
     // Byg: playerId → teams
-    const teamsByOwner = new Map<string, { name: string; points: number }[]>();
+    const teamsByOwner = new Map<string, { name: string; points: number; pricePaid: number }[]>();
     for (const row of (gtRes.data ?? []) as Record<string, unknown>[]) {
       const pid = String(row.owner_player_id);
       const tname = teamNameById.get(String(row.team_id));
       if (!tname) continue;
       const arr = teamsByOwner.get(pid) ?? [];
-      arr.push({ name: tname, points: calcTeamPoints(tname, matches) });
+      arr.push({ name: tname, points: calcTeamPoints(tname, matches), pricePaid: winnerBidByTeam.get(`${pid}|${tname}`) ?? 0 });
       teamsByOwner.set(pid, arr);
     }
 
@@ -318,18 +347,27 @@ export default function GamePage() {
                                 )}
                               >
                                 {team ? (
-                                  <div className="flex items-center justify-between gap-2 min-w-[130px]">
-                                    <span className={cn(
-                                      "font-medium truncate",
-                                      pt.player.id === myPlayer?.id ? "text-slate-100" : "text-slate-300"
-                                    )}>
-                                      {team.name}
-                                    </span>
-                                    {team.points > 0 && (
-                                      <span className="shrink-0 tabular-nums text-xs text-amber-300/80">
-                                        {team.points.toLocaleString("da-DK")}
+                                  <div className="flex flex-col gap-0.5 min-w-[130px]">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className={cn(
+                                        "font-medium truncate",
+                                        pt.player.id === myPlayer?.id ? "text-slate-100" : "text-slate-300"
+                                      )}>
+                                        {team.name}
                                       </span>
-                                    )}
+                                      {team.points > 0 && (
+                                        <span className="shrink-0 tabular-nums text-xs text-amber-300/80">
+                                          {team.points.toLocaleString("da-DK")} pt
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[0.65rem] text-slate-600">
+                                      {team.pricePaid > 0 && <span>{team.pricePaid} 🪙</span>}
+                                      {(() => {
+                                        const lbl = roiLabel(team.points, team.pricePaid);
+                                        return lbl ? <span className={cn("font-semibold", roiColor(team.points, team.pricePaid))}>ROI {lbl}</span> : null;
+                                      })()}
+                                    </div>
                                   </div>
                                 ) : null}
                               </td>

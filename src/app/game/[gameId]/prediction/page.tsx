@@ -18,15 +18,58 @@ const PLAYER_THEMES = [
   { header: "bg-gradient-to-r from-orange-500 to-orange-800",  accent: "text-orange-300",  border: "border-orange-500/40",  badge: "bg-orange-500/20 text-orange-200" },
 ];
 
+type MatchRow = {
+  home_team: string; away_team: string; stage: string;
+  home_score: number | null; away_score: number | null;
+  result_type: string | null; winner_side: string | null; status: string;
+};
+
 type TeamEntry = {
   name: string;
   flag: string;
   pricePaid: number;
+  currentPoints: number;
   mean: number;
   median: number;
   stdDev: number;
   fairPrice: number;
 };
+
+const _STAGES = ["group","round_of_32","round_of_16","quarter_final","semi_final","final"];
+const _STAGE_BONUS: Record<string, number> = { round_of_32:100, round_of_16:200, quarter_final:400, semi_final:600, final:800 };
+
+function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
+  let total = 0;
+  for (const stage of _STAGES) {
+    const ms = matches.filter((m) => m.stage === stage && m.status === "finished" && (m.home_team === teamName || m.away_team === teamName));
+    for (const m of ms) {
+      const isHome = m.home_team === teamName;
+      const myScore = isHome ? (m.home_score ?? 0) : (m.away_score ?? 0);
+      const opScore = isHome ? (m.away_score ?? 0) : (m.home_score ?? 0);
+      let won = myScore > opScore;
+      if (m.result_type === "penalties" && m.winner_side) won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
+      if (stage === "group") {
+        total += myScore === opScore ? 50 : won ? 150 : 0;
+      } else {
+        if (isET) { total += 50; if (won) total += 50; } else if (won) total += 150;
+        total += _STAGE_BONUS[stage] ?? 0;
+        if (stage === "final" && won) total += 1000;
+      }
+    }
+  }
+  return total;
+}
+
+function roiLabel(pts: number, bid: number) {
+  if (bid <= 0) return pts > 0 ? "∞" : null;
+  return (pts / bid).toFixed(1) + "x";
+}
+function roiColor(pts: number, bid: number) {
+  if (bid <= 0) return "text-slate-500";
+  const r = pts / bid;
+  return r >= 1 ? "text-emerald-400" : r >= 0.5 ? "text-amber-400" : "text-red-400";
+}
 
 type PlayerResult = {
   playerId: string;
@@ -72,12 +115,13 @@ export default function PredictionPage() {
   async function load() {
     setLoading(true);
 
-    const [gameRes, auctionRes, playersRes, gtRes, bidsRes] = await Promise.all([
+    const [gameRes, auctionRes, playersRes, gtRes, bidsRes, matchesRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("auction_state").select("status").eq("game_id", gameId).maybeSingle(),
       supabase.from("players").select("id, name, coins").eq("game_id", gameId),
       supabase.from("game_teams").select("owner_player_id, team_id").eq("game_id", gameId).not("owner_player_id", "is", null),
       supabase.from("auction_room_bids").select("player_id, team_name, amount, bid_phase, created_at").eq("game_id", gameId).order("bid_phase", { ascending: false }).order("created_at", { ascending: false }),
+      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").eq("game_id", gameId),
     ]);
 
     const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
@@ -87,6 +131,8 @@ export default function PredictionPage() {
     setAuctionFinished(status === "finished");
 
     if (status !== "finished") { setLoading(false); return; }
+
+    const allMatches = (matchesRes.data ?? []) as MatchRow[];
 
     // Holdnavne
     const teamIds = [...new Set((gtRes.data ?? []).map((r) => String(r.team_id)))];
@@ -117,6 +163,7 @@ export default function PredictionPage() {
         name: tname,
         flag: wc?.flag ?? "🏳",
         pricePaid,
+        currentPoints: calcTeamPoints(tname, allMatches),
         mean: wc?.mean ?? 0,
         median: wc?.median ?? 0,
         stdDev: wc?.stdDev ?? 0,
@@ -314,15 +361,28 @@ export default function PredictionPage() {
                     {/* Holdliste */}
                     <div className="flex-1 bg-slate-950/80 px-3 py-2">
                       <ul className="space-y-0.5">
-                        {p.teams.map((t) => (
-                          <li key={t.name} className="flex items-center justify-between gap-2 py-0.5 text-xs">
-                            <span className="flex items-center gap-1.5 truncate text-slate-200">
-                              <span>{t.flag}</span>
-                              <span className="truncate">{t.name}</span>
-                            </span>
-                            <span className="shrink-0 tabular-nums text-slate-400">{t.pricePaid}</span>
-                          </li>
-                        ))}
+                        {p.teams.map((t) => {
+                          const roi = roiLabel(t.currentPoints, t.pricePaid);
+                          return (
+                            <li key={t.name} className="flex items-center justify-between gap-2 py-0.5 text-xs">
+                              <span className="flex items-center gap-1.5 truncate text-slate-200">
+                                <span>{t.flag}</span>
+                                <span className="truncate">{t.name}</span>
+                              </span>
+                              <span className="flex items-center gap-2 shrink-0">
+                                {t.currentPoints > 0 && (
+                                  <span className="tabular-nums text-amber-300/70">{t.currentPoints} pt</span>
+                                )}
+                                <span className="tabular-nums text-slate-500">{t.pricePaid} 🪙</span>
+                                {roi && (
+                                  <span className={cn("font-bold tabular-nums", roiColor(t.currentPoints, t.pricePaid))}>
+                                    {roi}
+                                  </span>
+                                )}
+                              </span>
+                            </li>
+                          );
+                        })}
                       </ul>
                     </div>
 

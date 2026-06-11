@@ -10,14 +10,56 @@ import Link from "next/link";
 
 type Player = { id: string; name: string };
 
+type MatchRow = {
+  home_team: string; away_team: string; stage: string;
+  home_score: number | null; away_score: number | null;
+  result_type: string | null; winner_side: string | null; status: string;
+};
+
 type RoundRow = {
   order: number;
   roundId: string;
   teamName: string;
   winnerPlayerId: string | null;
-  // Latest bid per player in final phase: playerId → amount
+  teamPoints: number;
   bids: Record<string, number>;
 };
+
+const STAGES = ["group","round_of_32","round_of_16","quarter_final","semi_final","final"];
+const STAGE_BONUS: Record<string, number> = { round_of_32:100, round_of_16:200, quarter_final:400, semi_final:600, final:800 };
+
+function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
+  let total = 0;
+  for (const stage of STAGES) {
+    const ms = matches.filter((m) => m.stage === stage && m.status === "finished" && (m.home_team === teamName || m.away_team === teamName));
+    for (const m of ms) {
+      const isHome = m.home_team === teamName;
+      const myScore = isHome ? (m.home_score ?? 0) : (m.away_score ?? 0);
+      const opScore = isHome ? (m.away_score ?? 0) : (m.home_score ?? 0);
+      let won = myScore > opScore;
+      if (m.result_type === "penalties" && m.winner_side) won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
+      if (stage === "group") {
+        total += myScore === opScore ? 50 : won ? 150 : 0;
+      } else {
+        if (isET) { total += 50; if (won) total += 50; } else if (won) total += 150;
+        total += STAGE_BONUS[stage] ?? 0; // both teams get stage bonus
+        if (stage === "final" && won) total += 1000;
+      }
+    }
+  }
+  return total;
+}
+
+function roiLabel(pts: number, bid: number) {
+  if (bid <= 0) return pts > 0 ? "∞" : null;
+  return (pts / bid).toFixed(1) + "x";
+}
+function roiColor(pts: number, bid: number) {
+  if (bid <= 0) return "text-slate-500";
+  const r = pts / bid;
+  return r >= 1 ? "text-emerald-400" : r >= 0.5 ? "text-amber-400" : "text-red-400";
+}
 
 export default function BidsPage() {
   const params = useParams();
@@ -37,7 +79,7 @@ export default function BidsPage() {
   async function load() {
     setLoading(true);
 
-    const [gameRes, playersRes, bidsRes, teamsRes, teamNamesRes] = await Promise.all([
+    const [gameRes, playersRes, bidsRes, teamsRes, teamNamesRes, matchesRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("players").select("id, name").eq("game_id", gameId).order("name"),
       supabase.from("auction_room_bids")
@@ -46,6 +88,9 @@ export default function BidsPage() {
         .order("created_at", { ascending: true }),
       supabase.from("game_teams").select("team_id, owner_player_id").eq("game_id", gameId),
       supabase.from("teams").select("id, name"),
+      supabase.from("wc_matches")
+        .select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status")
+        .eq("game_id", gameId),
     ]);
 
     const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
@@ -99,11 +144,13 @@ export default function BidsPage() {
         latestByPlayer.set(b.player_id, b.amount);
       }
 
+      const matches = (matchesRes.data ?? []) as MatchRow[];
       return {
         roundId,
         teamName,
         firstBidAt,
         winnerPlayerId: ownerByTeamName.get(teamName) ?? null,
+        teamPoints: calcTeamPoints(teamName, matches),
         bids: Object.fromEntries(latestByPlayer),
       };
     });
@@ -120,6 +167,7 @@ export default function BidsPage() {
         roundId: r.roundId,
         teamName: r.teamName,
         winnerPlayerId: r.winnerPlayerId,
+        teamPoints: r.teamPoints,
         bids: r.bids,
       }))
     );
@@ -201,6 +249,7 @@ export default function BidsPage() {
                 <tr className="border-b border-white/10 bg-slate-950/80">
                   <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 w-10">#</th>
                   <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">Hold</th>
+                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">ROI</th>
                   {players.map((p) => (
                     <th key={p.id} className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">
                       {p.name}
@@ -212,10 +261,18 @@ export default function BidsPage() {
                 {rounds.map((r) => {
                   // Highest bid in this round = winning amount
                   const maxBid = Math.max(...Object.values(r.bids).filter((v) => v != null));
+                  const winnerBid = r.winnerPlayerId ? (r.bids[r.winnerPlayerId] ?? 0) : 0;
+                  const roi = roiLabel(r.teamPoints, winnerBid);
                   return (
                     <tr key={r.roundId} className="hover:bg-white/[0.03] transition-colors">
                       <td className="px-3 py-3 text-xs text-slate-600 tabular-nums">{r.order}</td>
-                      <td className="px-3 py-3 font-medium text-slate-200 whitespace-nowrap">{r.teamName}</td>
+                      <td className="px-3 py-3 font-medium text-slate-200 whitespace-nowrap">
+                        <div>{r.teamName}</div>
+                        {r.teamPoints > 0 && <div className="text-[0.65rem] text-amber-300/70 tabular-nums">{r.teamPoints.toLocaleString("da-DK")} pt</div>}
+                      </td>
+                      <td className={cn("px-3 py-3 text-right text-sm font-bold tabular-nums whitespace-nowrap", roi ? roiColor(r.teamPoints, winnerBid) : "text-slate-700")}>
+                        {roi ?? "—"}
+                      </td>
                       {players.map((p) => {
                         const bid = r.bids[p.id];
                         const isWinner = r.winnerPlayerId === p.id;

@@ -23,12 +23,15 @@ type ApiMatch = {
   homeScore: number | null;
   awayScore: number | null;
   extraTime: boolean;
-  penaltyShootout: { winner: "home" | "away" } | null;
+  // Zafronix bruger "penalties" (ikke penaltyShootout)
+  penalties: { home: number; away: number } | null;
+  penaltyShootout?: { winner: "home" | "away" } | null; // fallback
   stageNormalized: string;
+  kickoffUtc?: string;  // primær — fuld ISO datetime
   date?: string;
+  kickoff?: string;
   matchDate?: string;
   kickOff?: string;
-  kickoff?: string;
   startTime?: string;
   datetime?: string;
   scheduledAt?: string;
@@ -46,11 +49,21 @@ type DbMatch = {
 };
 
 function extractDate(m: ApiMatch): string | null {
+  // Foretruk kickoffUtc (fuld dato+tid i UTC), fald tilbage til andre felter
   const raw =
-    m.date ?? m.matchDate ?? m.kickOff ?? m.kickoff ??
-    m.startTime ?? m.datetime ?? m.scheduledAt ?? m.utcDate ?? null;
+    m.kickoffUtc ?? m.datetime ?? m.scheduledAt ?? m.utcDate ??
+    m.matchDate ?? m.kickOff ?? m.startTime ?? m.date ?? null;
   if (!raw) return null;
   try { return new Date(raw).toISOString(); } catch { return null; }
+}
+
+function getPenaltyWinner(m: ApiMatch): "home" | "away" | null {
+  if (m.penaltyShootout?.winner) return m.penaltyShootout.winner;
+  if (m.penalties) {
+    if (m.penalties.home > m.penalties.away) return "home";
+    if (m.penalties.away > m.penalties.home) return "away";
+  }
+  return null;
 }
 
 function adminClient() {
@@ -158,8 +171,9 @@ async function runSync(_req: Request) {
     const stage     = STAGE_MAP[m.stageNormalized];
     const matchDate = extractDate(m);
     const isFinished = m.homeScore !== null && m.awayScore !== null;
-    const resultType = m.penaltyShootout ? "penalties" : m.extraTime ? "extra_time" : "normal_time";
-    const winnerSide = m.penaltyShootout?.winner ?? null;
+    const hasPenalties = !!(m.penalties ?? m.penaltyShootout);
+    const resultType = hasPenalties ? "penalties" : m.extraTime ? "extra_time" : "normal_time";
+    const winnerSide = getPenaltyWinner(m);
 
     for (const gameId of gameIds) {
       // Slå op: foretruk zafronix_id, så kanoniske navne, så rå API-navne
@@ -205,26 +219,23 @@ async function runSync(_req: Request) {
     }
   }
 
-  // 4. Udfør DB-operationer i batches
-  const BATCH = 50;
+  // 4. Udfør DB-operationer — alt parallelt for at undgå timeout
   let synced = 0;
 
-  // Inserts i batches
-  for (let i = 0; i < toInsert.length; i += BATCH) {
-    const batch = toInsert.slice(i, i + BATCH);
-    const { error } = await supabase.from("wc_matches").insert(batch);
-    if (!error) synced += batch.length;
+  // Alle inserts i ét kald
+  if (toInsert.length > 0) {
+    const { error } = await supabase.from("wc_matches").insert(toInsert);
+    if (!error) synced += toInsert.length;
   }
 
-  // Updates i batches (parallel pr. batch)
-  for (let i = 0; i < toUpdate.length; i += BATCH) {
-    const batch = toUpdate.slice(i, i + BATCH);
+  // Alle updates parallelt på én gang
+  if (toUpdate.length > 0) {
     await Promise.all(
-      batch.map(({ id, updates }) =>
+      toUpdate.map(({ id, updates }) =>
         supabase.from("wc_matches").update(updates).eq("id", id)
       )
     );
-    synced += batch.length;
+    synced += toUpdate.length;
   }
 
   // Genberegn point

@@ -108,7 +108,11 @@ export default function MatchesPage() {
     const ownerByTeamName = new Map<string, string | null>();
     for (const t of teamRows ?? []) {
       const owner = ownerByTeamId.get(String(t.id)) ?? null;
-      ownerByTeamName.set(String(t.name).toLowerCase(), owner);
+      const rawName = String(t.name);
+      // Gem både råt navn og kanonisk navn som nøgler
+      ownerByTeamName.set(rawName.toLowerCase(), owner);
+      const canonical = findWC2026Team(rawName)?.name;
+      if (canonical) ownerByTeamName.set(canonical.toLowerCase(), owner);
     }
 
     // Byg kampe

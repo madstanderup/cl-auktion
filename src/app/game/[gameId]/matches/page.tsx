@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Trophy, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team } from "@/lib/wc2026-teams";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,15 @@ const STAGE_LABELS: Record<string, string> = {
   quarter_final: "Kvartfinale",
   semi_final:    "Semifinale",
   final:         "Finale",
+};
+
+// Point pr. stage for at nå den runde (gives til begge hold)
+const STAGE_BONUS: Record<string, number> = {
+  round_of_32:   100,
+  round_of_16:   200,
+  quarter_final: 400,
+  semi_final:    600,
+  final:         800,
 };
 
 type Match = {
@@ -29,16 +38,17 @@ type Match = {
   status: string;
   homeScore: number | null;
   awayScore: number | null;
+  resultType: string | null;
+  winnerSide: string | null;
 };
 
 type DayGroup = {
-  dateKey: string;   // "2026-06-11"
-  label: string;     // "Tors. 11/6"
+  dateKey: string;
+  label: string;
   matches: Match[];
 };
 
 const DA_DAYS = ["Søn", "Man", "Tirs", "Ons", "Tors", "Fre", "Lør"];
-const DA_MONTHS = ["jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
 
 function formatDayLabel(d: Date): string {
   return `${DA_DAYS[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
@@ -46,6 +56,50 @@ function formatDayLabel(d: Date): string {
 
 function formatTime(d: Date): string {
   return d.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Beregn point for ét hold i én kamp (spejler recalculate_game_points-logikken) */
+function calcMatchPoints(match: Match, isHome: boolean): number {
+  if (match.status !== "finished" || match.homeScore === null || match.awayScore === null) return 0;
+
+  const myScore  = isHome ? match.homeScore : match.awayScore;
+  const oppScore = isHome ? match.awayScore : match.homeScore;
+
+  let pts = 0;
+
+  // Sejr/uafgjort/tab
+  if (myScore > oppScore) {
+    pts += match.resultType === "normal_time" ? 150 : 50;
+  } else if (myScore === oppScore) {
+    pts += 50; // uafgjort (kun gruppespil)
+  }
+
+  // Knockout-bonus: gives til begge hold blot for at spille i runden
+  if (match.stage !== "group") {
+    pts += STAGE_BONUS[match.stage] ?? 0;
+  }
+
+  // Turneringsvinderbonus
+  if (match.stage === "final" && myScore > oppScore) {
+    pts += 1000;
+  }
+
+  return pts;
+}
+
+/** High score of the day: summer point fra dagens afsluttede kampe pr. ejer */
+function calcDayScores(matches: Match[]): { owner: string; pts: number }[] {
+  const totals = new Map<string, number>();
+  for (const m of matches) {
+    if (m.status !== "finished") continue;
+    const homePts = calcMatchPoints(m, true);
+    const awayPts = calcMatchPoints(m, false);
+    if (m.homeOwner && homePts > 0) totals.set(m.homeOwner, (totals.get(m.homeOwner) ?? 0) + homePts);
+    if (m.awayOwner && awayPts > 0) totals.set(m.awayOwner, (totals.get(m.awayOwner) ?? 0) + awayPts);
+  }
+  return [...totals.entries()]
+    .map(([owner, pts]) => ({ owner, pts }))
+    .sort((a, b) => b.pts - a.pts);
 }
 
 export default function MatchesPage() {
@@ -64,7 +118,6 @@ export default function MatchesPage() {
     void load();
   }, [gameId]);
 
-  // Scroll den aktive dag-fane ind i view
   useEffect(() => {
     if (!activeDay || !tabsRef.current) return;
     const el = tabsRef.current.querySelector(`[data-day="${activeDay}"]`) as HTMLElement | null;
@@ -87,19 +140,16 @@ export default function MatchesPage() {
     const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
     setGameLabel(g?.label ?? g?.invite_code ?? "Spil");
 
-    // Spiller-lookup
     const playerById = new Map(
       (playersRes.data ?? []).map((p) => [String(p.id), String(p.name)])
     );
 
-    // Hold-id → ejer-navn (via game_teams)
     const ownerByTeamId = new Map(
       (gtRes.data ?? [])
         .filter((r) => r.owner_player_id)
         .map((r) => [String(r.team_id), playerById.get(String(r.owner_player_id)) ?? null])
     );
 
-    // Hold-navn → team_id (hent alle relevante hold)
     const teamIds = [...new Set((gtRes.data ?? []).map((r) => String(r.team_id)))];
     const { data: teamRows } = teamIds.length > 0
       ? await supabase.from("teams").select("id, name").in("id", teamIds)
@@ -109,42 +159,38 @@ export default function MatchesPage() {
     for (const t of teamRows ?? []) {
       const owner = ownerByTeamId.get(String(t.id)) ?? null;
       const rawName = String(t.name);
-      // Gem både råt navn og kanonisk navn som nøgler
       ownerByTeamName.set(rawName.toLowerCase(), owner);
       const canonical = findWC2026Team(rawName)?.name;
       if (canonical) ownerByTeamName.set(canonical.toLowerCase(), owner);
     }
 
-    // Byg kampe
     const rawMatches = (matchesRes.data ?? []) as Record<string, unknown>[];
     const matches: Match[] = rawMatches.map((m) => {
       const rawHome = String(m.home_team);
       const rawAway = String(m.away_team);
-      // Normaliser via wc2026-teams så "South Korea" → "Rep. of Korea" etc.
       const homeTeam = findWC2026Team(rawHome)?.name ?? rawHome;
       const awayTeam = findWC2026Team(rawAway)?.name ?? rawAway;
       return {
-        id: String(m.id),
+        id:         String(m.id),
         homeTeam,
         awayTeam,
-        homeFlag: findWC2026Team(homeTeam)?.flag ?? "🏳",
-        awayFlag: findWC2026Team(awayTeam)?.flag ?? "🏳",
-        homeOwner: ownerByTeamName.get(homeTeam.toLowerCase()) ?? null,
-        awayOwner: ownerByTeamName.get(awayTeam.toLowerCase()) ?? null,
-        matchDate: m.match_date ? new Date(String(m.match_date)) : null,
-        stage: String(m.stage),
-        status: String(m.status),
-        homeScore: m.home_score != null ? Number(m.home_score) : null,
-        awayScore: m.away_score != null ? Number(m.away_score) : null,
+        homeFlag:   findWC2026Team(homeTeam)?.flag ?? "🏳",
+        awayFlag:   findWC2026Team(awayTeam)?.flag ?? "🏳",
+        homeOwner:  ownerByTeamName.get(homeTeam.toLowerCase()) ?? null,
+        awayOwner:  ownerByTeamName.get(awayTeam.toLowerCase()) ?? null,
+        matchDate:  m.match_date ? new Date(String(m.match_date)) : null,
+        stage:      String(m.stage),
+        status:     String(m.status),
+        homeScore:  m.home_score  != null ? Number(m.home_score)  : null,
+        awayScore:  m.away_score  != null ? Number(m.away_score)  : null,
+        resultType: m.result_type ? String(m.result_type) : null,
+        winnerSide: m.winner_side ? String(m.winner_side) : null,
       };
     });
 
-    // Gruppér pr. dag
     const byDay = new Map<string, Match[]>();
     for (const match of matches) {
-      const key = match.matchDate
-        ? match.matchDate.toLocaleDateString("sv-SE") // "2026-06-11"
-        : "ukendt";
+      const key = match.matchDate ? match.matchDate.toLocaleDateString("sv-SE") : "ukendt";
       const arr = byDay.get(key) ?? [];
       arr.push(match);
       byDay.set(key, arr);
@@ -152,34 +198,27 @@ export default function MatchesPage() {
 
     const dayGroups: DayGroup[] = [...byDay.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([dateKey, matches]) => {
+      .map(([dateKey, ms]) => {
         const d = dateKey !== "ukendt" ? new Date(dateKey) : null;
         return {
           dateKey,
           label: d ? formatDayLabel(d) : "Ukendt dato",
-          matches: matches.sort((a, b) =>
-            (a.matchDate?.getTime() ?? 0) - (b.matchDate?.getTime() ?? 0)
-          ),
+          matches: ms.sort((a, b) => (a.matchDate?.getTime() ?? 0) - (b.matchDate?.getTime() ?? 0)),
         };
       });
 
     setDays(dayGroups);
 
-    // Sæt aktiv dag til i dag (eller nærmeste fremtidige dag)
     const todayKey = new Date().toLocaleDateString("sv-SE");
-    const todayGroup = dayGroups.find((d) => d.dateKey === todayKey);
-    if (todayGroup) {
-      setActiveDay(todayKey);
-    } else {
-      // Nærmeste fremtidige dag
-      const future = dayGroups.find((d) => d.dateKey > todayKey);
-      setActiveDay(future?.dateKey ?? dayGroups[0]?.dateKey ?? null);
-    }
+    const future = dayGroups.find((d) => d.dateKey >= todayKey);
+    setActiveDay(future?.dateKey ?? dayGroups[0]?.dateKey ?? null);
 
     setLoading(false);
   }
 
   const activeDayGroup = days.find((d) => d.dateKey === activeDay);
+  const dayScores = activeDayGroup ? calcDayScores(activeDayGroup.matches) : [];
+  const hasFinishedToday = activeDayGroup?.matches.some((m) => m.status === "finished") ?? false;
 
   return (
     <div className="min-h-screen bg-[#030711] text-slate-100">
@@ -216,9 +255,10 @@ export default function MatchesPage() {
             style={{ scrollbarWidth: "none" }}
           >
             {days.map((day) => {
-              const isActive = day.dateKey === activeDay;
-              const isToday = day.dateKey === new Date().toLocaleDateString("sv-SE");
-              const hasPassed = day.dateKey < new Date().toLocaleDateString("sv-SE");
+              const isActive  = day.dateKey === activeDay;
+              const todayKey  = new Date().toLocaleDateString("sv-SE");
+              const isToday   = day.dateKey === todayKey;
+              const hasPassed = day.dateKey < todayKey;
               return (
                 <button
                   key={day.dateKey}
@@ -227,29 +267,23 @@ export default function MatchesPage() {
                   onClick={() => setActiveDay(day.dateKey)}
                   className={cn(
                     "shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-                    isActive
-                      ? "bg-amber-400/20 text-amber-200"
-                      : isToday
-                      ? "bg-blue-500/20 text-blue-300 hover:bg-blue-500/30"
-                      : hasPassed
-                      ? "text-slate-600 hover:text-slate-400"
-                      : "text-slate-400 hover:text-slate-200"
+                    isActive   ? "bg-amber-400/20 text-amber-200"
+                    : isToday  ? "bg-blue-500/20 text-blue-300 hover:bg-blue-500/30"
+                    : hasPassed? "text-slate-600 hover:text-slate-400"
+                    :            "text-slate-400 hover:text-slate-200"
                   )}
                 >
                   {day.label}
-                  {isToday && (
-                    <span className="ml-1.5 inline-block size-1.5 rounded-full bg-blue-400 align-middle" />
-                  )}
+                  {isToday && <span className="ml-1.5 inline-block size-1.5 rounded-full bg-blue-400 align-middle" />}
                 </button>
               );
             })}
           </div>
 
-          {/* ── Kampene for valgt dag ── */}
-          <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
+          <main className="mx-auto max-w-4xl px-4 py-6 sm:px-6 space-y-6">
             {activeDayGroup && (
               <>
-                <div className="mb-4 flex items-center gap-2">
+                <div className="flex items-center gap-2">
                   <h2 className="text-sm font-semibold text-white">{activeDayGroup.label}</h2>
                   <span className="text-xs text-slate-500">{activeDayGroup.matches.length} kampe</span>
                 </div>
@@ -257,22 +291,33 @@ export default function MatchesPage() {
                 <div className="space-y-2">
                   {activeDayGroup.matches.map((match) => {
                     const finished = match.status === "finished";
+                    const live     = match.status === "live";
                     const stageLabel = STAGE_LABELS[match.stage] ?? match.stage;
+                    const homePts  = calcMatchPoints(match, true);
+                    const awayPts  = calcMatchPoints(match, false);
 
                     return (
                       <div
                         key={match.id}
                         className={cn(
                           "rounded-xl border bg-slate-950/60 px-4 py-3",
-                          finished ? "border-white/[0.06]" : "border-white/10"
+                          live     ? "border-emerald-500/30 bg-emerald-950/20"
+                          : finished ? "border-white/[0.06]"
+                          :            "border-white/10"
                         )}
                       >
-                        {/* Kamp-header: tid + stage */}
+                        {/* Header: stage + tid/live-badge */}
                         <div className="mb-2 flex items-center gap-2">
                           <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500">
                             {stageLabel}
                           </span>
-                          {match.matchDate && (
+                          {live && (
+                            <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wider text-emerald-400">
+                              <Zap className="size-2.5" />
+                              Live
+                            </span>
+                          )}
+                          {match.matchDate && !live && (
                             <span className="ml-auto text-xs text-slate-500 tabular-nums">
                               {formatTime(match.matchDate)}
                             </span>
@@ -288,10 +333,8 @@ export default function MatchesPage() {
                               <span className={cn(
                                 "text-sm font-semibold",
                                 finished && match.homeScore !== null && match.awayScore !== null
-                                  ? match.homeScore > match.awayScore
-                                    ? "text-amber-200"
-                                    : match.homeScore < match.awayScore
-                                    ? "text-slate-500"
+                                  ? match.homeScore > match.awayScore ? "text-amber-200"
+                                    : match.homeScore < match.awayScore ? "text-slate-500"
                                     : "text-slate-200"
                                   : "text-white"
                               )}>
@@ -305,12 +348,20 @@ export default function MatchesPage() {
                             ) : (
                               <span className="text-[0.6rem] text-slate-700">Ikke købt</span>
                             )}
+                            {finished && homePts > 0 && (
+                              <span className="mt-0.5 text-[0.6rem] font-semibold text-emerald-400/80">
+                                +{homePts} pt
+                              </span>
+                            )}
                           </div>
 
                           {/* Score / VS */}
                           <div className="flex flex-col items-center gap-0.5 min-w-[52px]">
-                            {finished && match.homeScore !== null && match.awayScore !== null ? (
-                              <span className="text-xl font-extrabold tabular-nums text-white">
+                            {(finished || live) && match.homeScore !== null && match.awayScore !== null ? (
+                              <span className={cn(
+                                "text-xl font-extrabold tabular-nums",
+                                live ? "text-emerald-300" : "text-white"
+                              )}>
                                 {match.homeScore}–{match.awayScore}
                               </span>
                             ) : (
@@ -318,7 +369,7 @@ export default function MatchesPage() {
                             )}
                             {finished && (
                               <span className="text-[0.55rem] uppercase tracking-widest text-slate-600">
-                                Slut
+                                {match.resultType === "penalties" ? "Straffe" : match.resultType === "extra_time" ? "Forl." : "Slut"}
                               </span>
                             )}
                           </div>
@@ -329,10 +380,8 @@ export default function MatchesPage() {
                               <span className={cn(
                                 "text-sm font-semibold",
                                 finished && match.homeScore !== null && match.awayScore !== null
-                                  ? match.awayScore > match.homeScore
-                                    ? "text-amber-200"
-                                    : match.awayScore < match.homeScore
-                                    ? "text-slate-500"
+                                  ? match.awayScore > match.homeScore ? "text-amber-200"
+                                    : match.awayScore < match.homeScore ? "text-slate-500"
                                     : "text-slate-200"
                                   : "text-white"
                               )}>
@@ -347,12 +396,54 @@ export default function MatchesPage() {
                             ) : (
                               <span className="text-[0.6rem] text-slate-700">Ikke købt</span>
                             )}
+                            {finished && awayPts > 0 && (
+                              <span className="mt-0.5 text-[0.6rem] font-semibold text-emerald-400/80">
+                                +{awayPts} pt
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
                     );
                   })}
                 </div>
+
+                {/* ── High score of the day ── */}
+                {hasFinishedToday && dayScores.length > 0 && (
+                  <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 px-4 py-4">
+                    <div className="mb-3 flex items-center gap-2">
+                      <Trophy className="size-4 text-amber-400" />
+                      <span className="text-xs font-semibold uppercase tracking-wider text-amber-300">
+                        High score of the day
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {dayScores.map((row, i) => (
+                        <div key={row.owner} className="flex items-center gap-3">
+                          <span className={cn(
+                            "w-5 text-center text-xs font-bold tabular-nums",
+                            i === 0 ? "text-amber-300" : "text-slate-500"
+                          )}>
+                            {i + 1}.
+                          </span>
+                          <span className={cn(
+                            "flex-1 text-sm font-medium",
+                            i === 0 ? "text-white" : "text-slate-400"
+                          )}>
+                            {row.owner}
+                          </span>
+                          <span className={cn(
+                            "text-sm font-bold tabular-nums",
+                            i === 0 ? "text-amber-300" : "text-slate-400"
+                          )}>
+                            +{row.pts} pt
+                          </span>
+                          {i === 0 && <Trophy className="size-3.5 text-amber-400" />}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </main>

@@ -175,7 +175,9 @@ async function runSync(_req: Request) {
     const awayTeam  = rawAway ? (findWC2026Team(rawAway)?.name ?? rawAway) : "TBD";
     const stage     = STAGE_MAP[m.stageNormalized];
     const matchDate = extractDate(m);
-    const isFinished = m.homeScore !== null && m.awayScore !== null;
+    // Brug API's status-felt: "finished" | "live" | alt → "scheduled"
+    const apiStatus = m.status === "finished" ? "finished" : m.status === "live" ? "live" : "scheduled";
+    const isFinished = apiStatus === "finished";
     const hasPenalties = !!(m.penalties ?? m.penaltyShootout);
     const resultType = hasPenalties ? "penalties" : m.extraTime ? "extra_time" : "normal_time";
     const winnerSide = getPenaltyWinner(m);
@@ -194,6 +196,7 @@ async function runSync(_req: Request) {
           home_team: homeTeam,
           away_team: awayTeam,
           zafronix_match_id: m.id ?? existing.zafronix_match_id,
+          status: apiStatus,
         };
         if (matchDate) updates.match_date = matchDate;
         if (isFinished) {
@@ -201,7 +204,6 @@ async function runSync(_req: Request) {
           updates.away_score  = m.awayScore;
           updates.result_type = resultType;
           updates.winner_side = winnerSide;
-          updates.status      = "finished";
           pointsRecalculated  = true;
         }
         toUpdate.push({ id: existing.id, updates });
@@ -217,7 +219,7 @@ async function runSync(_req: Request) {
           away_score:        isFinished ? m.awayScore : null,
           result_type:       isFinished ? resultType : null,
           winner_side:       isFinished ? winnerSide : null,
-          status:            isFinished ? "finished" : "scheduled",
+          status:            apiStatus,
         });
         if (isFinished) pointsRecalculated = true;
       }

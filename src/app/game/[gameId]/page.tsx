@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Gavel, Loader2, ShieldCheck, Table2, TrendingUp, Trophy, Users } from "lucide-react";
+import { ArrowLeft, CalendarDays, Gavel, Loader2, ShieldCheck, Table2, TrendingUp, Trophy, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -212,6 +212,13 @@ export default function GamePage() {
                 Admin
               </Link>
             )}
+            <Link
+              href={`/game/${gameId}/matches`}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
+            >
+              <CalendarDays className="size-3.5 mr-1" />
+              Kampe
+            </Link>
             <Link
               href={`/game/${gameId}/bids`}
               className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}

@@ -35,10 +35,15 @@ function roiLabel(points: number, bid: number): string | null {
   if (bid <= 0) return points > 0 ? "∞" : null;
   return (points / bid).toFixed(1) + "x";
 }
-function roiColor(points: number, bid: number): string {
-  if (bid <= 0) return "text-slate-500";
-  const r = points / bid;
-  return r >= 8 ? "text-emerald-400" : r >= 4 ? "text-amber-400" : "text-red-400";
+function makeRoiColorFn(allTeams: { points: number; pricePaid: number }[]) {
+  const rois = allTeams.filter((t) => t.pricePaid > 0).map((t) => t.points / t.pricePaid).sort((a, b) => a - b);
+  const p30 = rois[Math.floor(rois.length * 0.3)] ?? 0;
+  const p70 = rois[Math.floor(rois.length * 0.7)] ?? 0;
+  return (points: number, bid: number): string => {
+    if (bid <= 0) return "text-slate-500";
+    const r = points / bid;
+    return r >= p70 ? "text-emerald-400" : r >= p30 ? "text-amber-400" : "text-red-400";
+  };
 }
 
 function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
@@ -195,6 +200,7 @@ export default function GamePage() {
 
   const isAuctionActive = auctionStatus && auctionStatus !== "finished";
   const maxTeams = Math.max(...allPlayerTeams.map((pt) => pt.teams.length), 0);
+  const roiColor = makeRoiColorFn(allPlayerTeams.flatMap((pt) => pt.teams));
 
   return (
     <div className="min-h-screen bg-[#030711] text-slate-100">

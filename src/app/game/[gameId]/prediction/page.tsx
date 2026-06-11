@@ -65,10 +65,15 @@ function roiLabel(pts: number, bid: number) {
   if (bid <= 0) return pts > 0 ? "∞" : null;
   return (pts / bid).toFixed(1) + "x";
 }
-function roiColor(pts: number, bid: number) {
-  if (bid <= 0) return "text-slate-500";
-  const r = pts / bid;
-  return r >= 8 ? "text-emerald-400" : r >= 4 ? "text-amber-400" : "text-red-400";
+function makeRoiColorFn(allTeams: { currentPoints: number; pricePaid: number }[]) {
+  const rois = allTeams.filter((t) => t.pricePaid > 0).map((t) => t.currentPoints / t.pricePaid).sort((a, b) => a - b);
+  const p30 = rois[Math.floor(rois.length * 0.3)] ?? 0;
+  const p70 = rois[Math.floor(rois.length * 0.7)] ?? 0;
+  return (pts: number, bid: number): string => {
+    if (bid <= 0) return "text-slate-500";
+    const r = pts / bid;
+    return r >= p70 ? "text-emerald-400" : r >= p30 ? "text-amber-400" : "text-red-400";
+  };
 }
 
 type PlayerResult = {
@@ -227,6 +232,8 @@ export default function PredictionPage() {
     setResults(full);
     setLoading(false);
   }
+
+  const roiColor = makeRoiColorFn(results.flatMap((p) => p.teams));
 
   const sorted = useMemo(
     () => [...results].sort((a, b) =>

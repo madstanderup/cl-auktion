@@ -55,10 +55,15 @@ function roiLabel(pts: number, bid: number) {
   if (bid <= 0) return pts > 0 ? "∞" : null;
   return (pts / bid).toFixed(1) + "x";
 }
-function roiColor(pts: number, bid: number) {
-  if (bid <= 0) return "text-slate-500";
-  const r = pts / bid;
-  return r >= 8 ? "text-emerald-400" : r >= 4 ? "text-amber-400" : "text-red-400";
+function makeRoiColorFn(allRounds: { teamPoints: number; winnerBid: number }[]) {
+  const rois = allRounds.filter((r) => r.winnerBid > 0).map((r) => r.teamPoints / r.winnerBid).sort((a, b) => a - b);
+  const p30 = rois[Math.floor(rois.length * 0.3)] ?? 0;
+  const p70 = rois[Math.floor(rois.length * 0.7)] ?? 0;
+  return (pts: number, bid: number): string => {
+    if (bid <= 0) return "text-slate-500";
+    const r = pts / bid;
+    return r >= p70 ? "text-emerald-400" : r >= p30 ? "text-amber-400" : "text-red-400";
+  };
 }
 
 export default function BidsPage() {
@@ -199,6 +204,10 @@ export default function BidsPage() {
     URL.revokeObjectURL(url);
   }
 
+  const roiColor = makeRoiColorFn(
+    rounds.map((r) => ({ teamPoints: r.teamPoints, winnerBid: r.winnerPlayerId ? (r.bids[r.winnerPlayerId] ?? 0) : 0 }))
+  );
+
   return (
     <div className="min-h-screen bg-[#030711] text-slate-100">
       <header className="border-b border-white/[0.08] bg-slate-950/40 px-4 py-4 backdrop-blur-md sm:px-6">
@@ -263,6 +272,7 @@ export default function BidsPage() {
                   const maxBid = Math.max(...Object.values(r.bids).filter((v) => v != null));
                   const winnerBid = r.winnerPlayerId ? (r.bids[r.winnerPlayerId] ?? 0) : 0;
                   const roi = roiLabel(r.teamPoints, winnerBid);
+
                   return (
                     <tr key={r.roundId} className="hover:bg-white/[0.03] transition-colors">
                       <td className="px-3 py-3 text-xs text-slate-600 tabular-nums">{r.order}</td>

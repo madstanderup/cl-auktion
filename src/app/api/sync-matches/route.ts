@@ -169,11 +169,10 @@ async function runSync(_req: Request) {
   let pointsRecalculated = false;
 
   for (const m of relevant) {
-    if (!m.homeTeam || !m.awayTeam) continue; // spring over kampe uden holdnavne (fx uafgjorte knockoutrunder)
-    const homeTeam  = findWC2026Team(m.homeTeam.trim())?.name ?? m.homeTeam.trim();
-    const awayTeam  = findWC2026Team(m.awayTeam.trim())?.name ?? m.awayTeam.trim();
-    const rawHome   = m.homeTeam.trim().toLowerCase();
-    const rawAway   = m.awayTeam.trim().toLowerCase();
+    const rawHome   = (m.homeTeam ?? "").trim();
+    const rawAway   = (m.awayTeam ?? "").trim();
+    const homeTeam  = rawHome ? (findWC2026Team(rawHome)?.name ?? rawHome) : "TBD";
+    const awayTeam  = rawAway ? (findWC2026Team(rawAway)?.name ?? rawAway) : "TBD";
     const stage     = STAGE_MAP[m.stageNormalized];
     const matchDate = extractDate(m);
     const isFinished = m.homeScore !== null && m.awayScore !== null;

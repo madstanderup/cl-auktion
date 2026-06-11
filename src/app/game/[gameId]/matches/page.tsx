@@ -114,8 +114,11 @@ export default function MatchesPage() {
     // Byg kampe
     const rawMatches = (matchesRes.data ?? []) as Record<string, unknown>[];
     const matches: Match[] = rawMatches.map((m) => {
-      const homeTeam = String(m.home_team);
-      const awayTeam = String(m.away_team);
+      const rawHome = String(m.home_team);
+      const rawAway = String(m.away_team);
+      // Normaliser via wc2026-teams så "South Korea" → "Rep. of Korea" etc.
+      const homeTeam = findWC2026Team(rawHome)?.name ?? rawHome;
+      const awayTeam = findWC2026Team(rawAway)?.name ?? rawAway;
       return {
         id: String(m.id),
         homeTeam,

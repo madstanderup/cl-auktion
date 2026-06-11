@@ -169,9 +169,9 @@ async function runSync(_req: Request) {
   let pointsRecalculated = false;
 
   for (const m of relevant) {
+    if (!m.homeTeam || !m.awayTeam) continue; // spring over kampe uden holdnavne (fx uafgjorte knockoutrunder)
     const homeTeam  = findWC2026Team(m.homeTeam.trim())?.name ?? m.homeTeam.trim();
     const awayTeam  = findWC2026Team(m.awayTeam.trim())?.name ?? m.awayTeam.trim();
-    // Also try raw API names for lookup (catches old rows with wrong names)
     const rawHome   = m.homeTeam.trim().toLowerCase();
     const rawAway   = m.awayTeam.trim().toLowerCase();
     const stage     = STAGE_MAP[m.stageNormalized];

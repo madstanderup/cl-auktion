@@ -25,7 +25,6 @@ type ApiMatch = {
   extraTime: boolean;
   penaltyShootout: { winner: "home" | "away" } | null;
   stageNormalized: string;
-  // Mulige dato-felter fra Zafronix — vi prøver alle
   date?: string;
   matchDate?: string;
   kickOff?: string;
@@ -37,16 +36,21 @@ type ApiMatch = {
   status?: string;
 };
 
+type DbMatch = {
+  id: string;
+  game_id: string;
+  zafronix_match_id: string | null;
+  home_team: string;
+  away_team: string;
+  status: string;
+};
+
 function extractDate(m: ApiMatch): string | null {
   const raw =
     m.date ?? m.matchDate ?? m.kickOff ?? m.kickoff ??
     m.startTime ?? m.datetime ?? m.scheduledAt ?? m.utcDate ?? null;
   if (!raw) return null;
-  try {
-    return new Date(raw).toISOString();
-  } catch {
-    return null;
-  }
+  try { return new Date(raw).toISOString(); } catch { return null; }
 }
 
 function adminClient() {
@@ -63,7 +67,7 @@ export async function POST(req: Request) { return runSync(req); }
 async function runSync(_req: Request) {
   const supabase = adminClient();
 
-  // 1. Hent ALLE kampe fra Zafronix (inkl. planlagte)
+  // 1. Hent kampe fra Zafronix
   let apiRes: Response;
   try {
     apiRes = await fetch(ZAFRONIX_URL, {
@@ -86,7 +90,6 @@ async function runSync(_req: Request) {
     return NextResponse.json({ error: `JSON parse fejl: ${String(err)}` }, { status: 502 });
   }
 
-  // Håndter forskellige API-svar-strukturer
   let allMatches: ApiMatch[] = [];
   if (Array.isArray(apiData)) {
     allMatches = apiData;
@@ -96,111 +99,135 @@ async function runSync(_req: Request) {
     allMatches = (apiData as { matches: ApiMatch[] }).matches;
   }
 
-  // Log første kamp for at se hvilke felter API'en returnerer
   const sampleFields = allMatches[0] ? Object.keys(allMatches[0]) : [];
-
-  // Filtrer til kendte stages
   const relevant = allMatches.filter((m) => STAGE_MAP[m.stageNormalized]);
 
   if (relevant.length === 0) {
     return NextResponse.json({
-      ok: true,
-      synced: 0,
+      ok: true, synced: 0,
       message: "Ingen kampe fundet i kendte stages.",
-      totalFromApi: allMatches.length,
-      sampleFields,
+      totalFromApi: allMatches.length, sampleFields,
       sample: allMatches[0] ?? null,
     });
   }
 
-  const { data: games, error: gamesErr } = await supabase.from("games").select("id");
+  // 2. Hent alle spil og alle eksisterende wc_matches i ét kald
+  const [{ data: games, error: gamesErr }, { data: existingRows }] = await Promise.all([
+    supabase.from("games").select("id"),
+    supabase.from("wc_matches").select("id, game_id, zafronix_match_id, home_team, away_team, status"),
+  ]);
+
   if (gamesErr) return NextResponse.json({ error: gamesErr.message }, { status: 500 });
   if (!games?.length) return NextResponse.json({ ok: true, synced: 0, message: "Ingen spil i DB." });
 
-  let synced = 0;
+  const gameIds = games.map((g) => String(g.id));
+
+  // Byg lookup-map: "gameId|zafronix_id" → DbMatch  og  "gameId|HOME|AWAY" → DbMatch
+  const byZafId = new Map<string, DbMatch>();
+  const byTeams = new Map<string, DbMatch>();
+  for (const row of (existingRows ?? []) as DbMatch[]) {
+    const gid = String(row.game_id);
+    if (row.zafronix_match_id) {
+      byZafId.set(`${gid}|${row.zafronix_match_id}`, row);
+    }
+    byTeams.set(`${gid}|${row.home_team.toLowerCase()}|${row.away_team.toLowerCase()}`, row);
+  }
+
+  // 3. Byg lister over upserts
+  const toInsert: Record<string, unknown>[] = [];
+  const toUpdate: { id: string; updates: Record<string, unknown> }[] = [];
   let pointsRecalculated = false;
 
   for (const m of relevant) {
-    // Normaliser til kanonisk navn (fra wc2026-teams) så det matcher game_teams
     const homeTeam  = findWC2026Team(m.homeTeam.trim())?.name ?? m.homeTeam.trim();
     const awayTeam  = findWC2026Team(m.awayTeam.trim())?.name ?? m.awayTeam.trim();
+    // Also try raw API names for lookup (catches old rows with wrong names)
+    const rawHome   = m.homeTeam.trim().toLowerCase();
+    const rawAway   = m.awayTeam.trim().toLowerCase();
     const stage     = STAGE_MAP[m.stageNormalized];
     const matchDate = extractDate(m);
     const isFinished = m.homeScore !== null && m.awayScore !== null;
     const resultType = m.penaltyShootout ? "penalties" : m.extraTime ? "extra_time" : "normal_time";
     const winnerSide = m.penaltyShootout?.winner ?? null;
 
-    for (const game of games) {
-      const gameId = String(game.id);
-
-      // Slå op via zafronix_match_id ELLER de gamle/nye holdnavne
-      // Vi søger også på API's rå navne (m.homeTeam) for at fange gamle rækker
-      const rawHome = m.homeTeam.trim();
-      const rawAway = m.awayTeam.trim();
-      const { data: existing } = await supabase
-        .from("wc_matches")
-        .select("id, status, home_team, away_team")
-        .eq("game_id", gameId)
-        .or(
-          m.id
-            ? `zafronix_match_id.eq.${m.id},and(home_team.ilike.${homeTeam},away_team.ilike.${awayTeam}),and(home_team.ilike.${rawHome},away_team.ilike.${rawAway})`
-            : `and(home_team.ilike.${homeTeam},away_team.ilike.${awayTeam}),and(home_team.ilike.${rawHome},away_team.ilike.${rawAway})`,
-        )
-        .maybeSingle();
+    for (const gameId of gameIds) {
+      // Slå op: foretruk zafronix_id, så kanoniske navne, så rå API-navne
+      const existing =
+        (m.id ? byZafId.get(`${gameId}|${m.id}`) : undefined) ??
+        byTeams.get(`${gameId}|${homeTeam.toLowerCase()}|${awayTeam.toLowerCase()}`) ??
+        byTeams.get(`${gameId}|${rawHome}|${rawAway}`);
 
       if (existing) {
-        // Allerede finished — opdater kun hvis ny info
         if (existing.status === "finished" && !isFinished) continue;
 
-        const updates: Record<string, unknown> = {};
-        // Ret altid holdnavne til det kanoniske navn
-        updates.home_team = homeTeam;
-        updates.away_team = awayTeam;
-        if (m.id) updates.zafronix_match_id = m.id;
+        const updates: Record<string, unknown> = {
+          home_team: homeTeam,
+          away_team: awayTeam,
+          zafronix_match_id: m.id ?? existing.zafronix_match_id,
+        };
         if (matchDate) updates.match_date = matchDate;
         if (isFinished) {
-          updates.home_score   = m.homeScore;
-          updates.away_score   = m.awayScore;
-          updates.result_type  = resultType;
-          updates.winner_side  = winnerSide;
-          updates.status       = "finished";
+          updates.home_score  = m.homeScore;
+          updates.away_score  = m.awayScore;
+          updates.result_type = resultType;
+          updates.winner_side = winnerSide;
+          updates.status      = "finished";
+          pointsRecalculated  = true;
         }
-        if (Object.keys(updates).length > 0) {
-          await supabase.from("wc_matches").update(updates).eq("id", existing.id);
-          synced++;
-          if (isFinished) pointsRecalculated = true;
-        }
+        toUpdate.push({ id: existing.id, updates });
       } else {
-        // Indsæt ny kamp (planlagt eller færdig)
-        await supabase.from("wc_matches").insert({
-          game_id:            gameId,
-          zafronix_match_id:  m.id ?? null,
-          home_team:          homeTeam,
-          away_team:          awayTeam,
+        toInsert.push({
+          game_id:           gameId,
+          zafronix_match_id: m.id ?? null,
+          home_team:         homeTeam,
+          away_team:         awayTeam,
           stage,
-          match_date:         matchDate,
-          home_score:         isFinished ? m.homeScore : null,
-          away_score:         isFinished ? m.awayScore : null,
-          result_type:        isFinished ? resultType : null,
-          winner_side:        isFinished ? winnerSide : null,
-          status:             isFinished ? "finished" : "scheduled",
+          match_date:        matchDate,
+          home_score:        isFinished ? m.homeScore : null,
+          away_score:        isFinished ? m.awayScore : null,
+          result_type:       isFinished ? resultType : null,
+          winner_side:       isFinished ? winnerSide : null,
+          status:            isFinished ? "finished" : "scheduled",
         });
-        synced++;
         if (isFinished) pointsRecalculated = true;
       }
     }
   }
 
-  // Genberegn point hvis der var nye resultater
+  // 4. Udfør DB-operationer i batches
+  const BATCH = 50;
+  let synced = 0;
+
+  // Inserts i batches
+  for (let i = 0; i < toInsert.length; i += BATCH) {
+    const batch = toInsert.slice(i, i + BATCH);
+    const { error } = await supabase.from("wc_matches").insert(batch);
+    if (!error) synced += batch.length;
+  }
+
+  // Updates i batches (parallel pr. batch)
+  for (let i = 0; i < toUpdate.length; i += BATCH) {
+    const batch = toUpdate.slice(i, i + BATCH);
+    await Promise.all(
+      batch.map(({ id, updates }) =>
+        supabase.from("wc_matches").update(updates).eq("id", id)
+      )
+    );
+    synced += batch.length;
+  }
+
+  // Genberegn point
   if (pointsRecalculated) {
-    for (const g of games) {
-      await supabase.rpc("recalculate_game_points", { p_game_id: g.id });
-    }
+    await Promise.all(
+      games.map((g) => supabase.rpc("recalculate_game_points", { p_game_id: g.id }))
+    );
   }
 
   return NextResponse.json({
     ok: true,
     synced,
+    inserted: toInsert.length,
+    updated: toUpdate.length,
     totalFromApi: allMatches.length,
     relevantFromApi: relevant.length,
     pointsRecalculated,

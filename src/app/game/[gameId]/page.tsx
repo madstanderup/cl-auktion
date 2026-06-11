@@ -262,11 +262,11 @@ export default function GamePage() {
               Budoversigt
             </Link>
             <Link
-              href={`/game/${gameId}/prediction`}
+              href={`/game/${gameId}/summary`}
               className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
             >
               <TrendingUp className="size-3.5 mr-1" />
-              Prediction
+              Summary
             </Link>
             <Link
               href="/regler"

@@ -100,7 +100,7 @@ function calcVurdering(fairValueSum: number, coinsSpent: number): number {
   return Math.min(10, Math.max(0, Math.round(ratio * 7 * 10) / 10));
 }
 
-export default function PredictionPage() {
+export default function SummaryPage() {
   const params = useParams();
   const router = useRouter();
   const gameId = params.gameId as string;
@@ -293,7 +293,7 @@ export default function PredictionPage() {
         ) : !auctionFinished ? (
           <div className="py-20 text-center">
             <TrendingUp className="mx-auto size-10 text-slate-600 mb-4" />
-            <p className="text-slate-400 text-sm">Prediction er tilgængelig når auktionen er afsluttet.</p>
+            <p className="text-slate-400 text-sm">Summary er tilgængelig når auktionen er afsluttet.</p>
           </div>
         ) : (
           <div className="space-y-8">

@@ -38,7 +38,7 @@ function roiLabel(points: number, bid: number): string | null {
 function roiColor(points: number, bid: number): string {
   if (bid <= 0) return "text-slate-500";
   const r = points / bid;
-  return r >= 1 ? "text-emerald-400" : r >= 0.5 ? "text-amber-400" : "text-red-400";
+  return r >= 8 ? "text-emerald-400" : r >= 4 ? "text-amber-400" : "text-red-400";
 }
 
 function calcTeamPoints(teamName: string, matches: MatchRow[]): number {

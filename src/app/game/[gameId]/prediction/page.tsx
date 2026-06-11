@@ -68,7 +68,7 @@ function roiLabel(pts: number, bid: number) {
 function roiColor(pts: number, bid: number) {
   if (bid <= 0) return "text-slate-500";
   const r = pts / bid;
-  return r >= 1 ? "text-emerald-400" : r >= 0.5 ? "text-amber-400" : "text-red-400";
+  return r >= 8 ? "text-emerald-400" : r >= 4 ? "text-amber-400" : "text-red-400";
 }
 
 type PlayerResult = {

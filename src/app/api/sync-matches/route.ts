@@ -1,5 +1,6 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { findWC2026Team } from "@/lib/wc2026-teams";
 
 const ZAFRONIX_API_KEY = "zwc_free_a414055dfd6fb1c29b4edb19";
 const ZAFRONIX_URL = "https://api.zafronix.com/fifa/worldcup/v1/matches?year=2026";
@@ -120,8 +121,9 @@ async function runSync(_req: Request) {
   let pointsRecalculated = false;
 
   for (const m of relevant) {
-    const homeTeam  = m.homeTeam.trim();
-    const awayTeam  = m.awayTeam.trim();
+    // Normaliser til kanonisk navn (fra wc2026-teams) så det matcher game_teams
+    const homeTeam  = findWC2026Team(m.homeTeam.trim())?.name ?? m.homeTeam.trim();
+    const awayTeam  = findWC2026Team(m.awayTeam.trim())?.name ?? m.awayTeam.trim();
     const stage     = STAGE_MAP[m.stageNormalized];
     const matchDate = extractDate(m);
     const isFinished = m.homeScore !== null && m.awayScore !== null;

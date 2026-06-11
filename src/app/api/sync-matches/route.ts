@@ -63,15 +63,27 @@ async function runSync(_req: Request) {
   const supabase = adminClient();
 
   // 1. Hent ALLE kampe fra Zafronix (inkl. planlagte)
-  const apiRes = await fetch(ZAFRONIX_URL, {
-    headers: { "X-API-Key": ZAFRONIX_API_KEY },
-    next: { revalidate: 0 },
-  });
-  if (!apiRes.ok) {
-    return NextResponse.json({ error: `Zafronix API fejl: ${apiRes.status}` }, { status: 502 });
+  let apiRes: Response;
+  try {
+    apiRes = await fetch(ZAFRONIX_URL, {
+      headers: { "X-API-Key": ZAFRONIX_API_KEY },
+      cache: "no-store",
+    });
+  } catch (err) {
+    return NextResponse.json({ error: `Zafronix fetch fejl: ${String(err)}` }, { status: 502 });
   }
 
-  const apiData = (await apiRes.json()) as { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];
+  if (!apiRes.ok) {
+    const body = await apiRes.text().catch(() => "");
+    return NextResponse.json({ error: `Zafronix API fejl: ${apiRes.status}`, body }, { status: 502 });
+  }
+
+  let apiData: { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];
+  try {
+    apiData = (await apiRes.json()) as { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];
+  } catch (err) {
+    return NextResponse.json({ error: `JSON parse fejl: ${String(err)}` }, { status: 502 });
+  }
 
   // Håndter forskellige API-svar-strukturer
   let allMatches: ApiMatch[] = [];

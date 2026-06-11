@@ -74,8 +74,14 @@ function adminClient() {
   );
 }
 
-export async function GET(req: Request) { return runSync(req); }
-export async function POST(req: Request) { return runSync(req); }
+export async function GET(req: Request) {
+  try { return await runSync(req); }
+  catch (err) { return NextResponse.json({ error: `Uventet fejl: ${String(err)}`, stack: err instanceof Error ? err.stack : undefined }, { status: 500 }); }
+}
+export async function POST(req: Request) {
+  try { return await runSync(req); }
+  catch (err) { return NextResponse.json({ error: `Uventet fejl: ${String(err)}`, stack: err instanceof Error ? err.stack : undefined }, { status: 500 }); }
+}
 
 async function runSync(_req: Request) {
   const supabase = adminClient();

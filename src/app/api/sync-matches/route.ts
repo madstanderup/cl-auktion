@@ -133,15 +133,18 @@ async function runSync(_req: Request) {
     for (const game of games) {
       const gameId = String(game.id);
 
-      // Slå op via zafronix_match_id (hurtigst) eller hold-navne
+      // Slå op via zafronix_match_id ELLER de gamle/nye holdnavne
+      // Vi søger også på API's rå navne (m.homeTeam) for at fange gamle rækker
+      const rawHome = m.homeTeam.trim();
+      const rawAway = m.awayTeam.trim();
       const { data: existing } = await supabase
         .from("wc_matches")
-        .select("id, status")
+        .select("id, status, home_team, away_team")
         .eq("game_id", gameId)
         .or(
           m.id
-            ? `zafronix_match_id.eq.${m.id},and(home_team.ilike.${homeTeam},away_team.ilike.${awayTeam})`
-            : `home_team.ilike.${homeTeam},away_team.ilike.${awayTeam}`,
+            ? `zafronix_match_id.eq.${m.id},and(home_team.ilike.${homeTeam},away_team.ilike.${awayTeam}),and(home_team.ilike.${rawHome},away_team.ilike.${rawAway})`
+            : `and(home_team.ilike.${homeTeam},away_team.ilike.${awayTeam}),and(home_team.ilike.${rawHome},away_team.ilike.${rawAway})`,
         )
         .maybeSingle();
 
@@ -150,6 +153,10 @@ async function runSync(_req: Request) {
         if (existing.status === "finished" && !isFinished) continue;
 
         const updates: Record<string, unknown> = {};
+        // Ret altid holdnavne til det kanoniske navn
+        updates.home_team = homeTeam;
+        updates.away_team = awayTeam;
+        if (m.id) updates.zafronix_match_id = m.id;
         if (matchDate) updates.match_date = matchDate;
         if (isFinished) {
           updates.home_score   = m.homeScore;

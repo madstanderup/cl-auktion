@@ -192,14 +192,16 @@ export default function SuperAdminPage() {
     setMessage(null);
     try {
       const res = await fetch("/api/sync-matches", { method: "POST" });
-      const body = await res.json() as { ok?: boolean; synced?: number; totalFromApi?: number; relevantFromApi?: number; error?: string };
+      const text = await res.text();
+      let body: { ok?: boolean; synced?: number; totalFromApi?: number; relevantFromApi?: number; error?: string } = {};
+      try { body = JSON.parse(text) as typeof body; } catch { /* ignore */ }
       if (body.ok) {
         setMessage(`Kampe synkroniseret ✓ — ${body.synced} opdateringer, ${body.relevantFromApi ?? 0} relevante kampe fra API (${body.totalFromApi ?? 0} i alt).`);
       } else {
-        setMessage(body.error ?? "Fejl ved synkronisering.");
+        setMessage(body.error ?? `Fejl ved synkronisering (HTTP ${res.status}): ${text.slice(0, 200)}`);
       }
-    } catch {
-      setMessage("Netværksfejl ved synkronisering.");
+    } catch (err) {
+      setMessage(`Netværksfejl: ${String(err)}`);
     } finally {
       setActionLoading(null);
     }

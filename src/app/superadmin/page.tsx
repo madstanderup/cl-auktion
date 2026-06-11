@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw, ShieldCheck, Trash2, KeyRound, Gamepad2, Users } from "lucide-react";
+import { Loader2, RefreshCw, ShieldCheck, Trash2, KeyRound, Gamepad2, Users, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 
@@ -187,6 +187,24 @@ export default function SuperAdminPage() {
     }
   }
 
+  async function handleSyncMatches() {
+    setActionLoading("sync-matches");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/sync-matches", { method: "POST" });
+      const body = await res.json() as { ok?: boolean; synced?: number; totalFromApi?: number; relevantFromApi?: number; error?: string };
+      if (body.ok) {
+        setMessage(`Kampe synkroniseret ✓ — ${body.synced} opdateringer, ${body.relevantFromApi ?? 0} relevante kampe fra API (${body.totalFromApi ?? 0} i alt).`);
+      } else {
+        setMessage(body.error ?? "Fejl ved synkronisering.");
+      }
+    } catch {
+      setMessage("Netværksfejl ved synkronisering.");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -242,6 +260,33 @@ export default function SuperAdminPage() {
             {message}
           </p>
         )}
+
+        {/* ── Synkroniser kampe ── */}
+        <div className="rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl">
+          <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
+            <RefreshCcw className="size-4 text-blue-400/80" />
+            <p className="text-sm font-medium text-white">Kampsynkronisering</p>
+          </div>
+          <div className="flex items-center justify-between gap-4 px-4 py-4">
+            <p className="text-xs text-slate-400">
+              Henter alle VM 2026-kampe (planlagte + afsluttede) fra Zafronix og gemmer dem i databasen.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0 gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs"
+              disabled={actionLoading === "sync-matches"}
+              onClick={() => void handleSyncMatches()}
+            >
+              {actionLoading === "sync-matches" ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <RefreshCcw className="size-3" />
+              )}
+              Sync kampe
+            </Button>
+          </div>
+        </div>
 
         {/* ── Spil ── */}
         <div className="rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl">

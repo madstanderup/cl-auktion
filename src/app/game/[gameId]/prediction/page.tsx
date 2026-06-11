@@ -520,6 +520,56 @@ export default function PredictionPage() {
                 </div>
               </div>
 
+              {/* ROI Highscore */}
+              {(() => {
+                const roiRanking = results
+                  .flatMap((p) =>
+                    p.teams
+                      .filter((t) => t.pricePaid > 0)
+                      .map((t) => ({
+                        playerName: p.playerName,
+                        teamName: t.name,
+                        flag: t.flag,
+                        pricePaid: t.pricePaid,
+                        currentPoints: t.currentPoints,
+                        roi: t.currentPoints / t.pricePaid,
+                      }))
+                  )
+                  .filter((t) => t.currentPoints > 0)
+                  .sort((a, b) => b.roi - a.roi)
+                  .slice(0, 5);
+
+                if (roiRanking.length === 0) return null;
+                return (
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-5 sm:col-span-2">
+                    <p className="mb-3 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-emerald-300/80">
+                      📈 ROI Highscore — bedste afkast pr. mønt
+                    </p>
+                    <ol className="space-y-2">
+                      {roiRanking.map((t, i) => (
+                        <li key={`${t.playerName}-${t.teamName}`} className="flex items-center gap-3 text-sm">
+                          <span className={cn(
+                            "w-5 shrink-0 text-center text-xs font-bold",
+                            i === 0 ? "text-emerald-300" : "text-slate-500"
+                          )}>
+                            {i + 1}.
+                          </span>
+                          <span className="text-slate-400 text-xs shrink-0">{t.playerName}</span>
+                          <span className="flex-1 truncate font-medium text-white">{t.flag} {t.teamName}</span>
+                          <div className="shrink-0 flex items-center gap-3 text-xs">
+                            <span className="tabular-nums text-amber-300/70">{t.currentPoints.toLocaleString("da-DK")} pt</span>
+                            <span className="tabular-nums text-slate-500">{t.pricePaid} 🪙</span>
+                            <span className={cn("font-bold tabular-nums text-sm", roiColor(t.currentPoints, t.pricePaid))}>
+                              {(t.roi).toFixed(1)}x
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                );
+              })()}
+
               {/* Vindchance oversigt */}
               <div className="rounded-xl border border-white/10 bg-slate-950/70 p-5 sm:col-span-2">
                 <p className="mb-4 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-blue-300/80">

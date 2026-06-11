@@ -70,17 +70,28 @@ async function runSync(_req: Request) {
   // 1. Hent kampe fra Zafronix
   let apiRes: Response;
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
     apiRes = await fetch(ZAFRONIX_URL, {
       headers: { "X-API-Key": ZAFRONIX_API_KEY },
       cache: "no-store",
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
   } catch (err) {
-    return NextResponse.json({ error: `Zafronix fetch fejl: ${String(err)}` }, { status: 502 });
+    const msg = String(err).includes("abort") ? "Zafronix svarede ikke inden for 15 sekunder (timeout)" : `Zafronix fetch fejl: ${String(err)}`;
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
 
   if (!apiRes.ok) {
     const body = await apiRes.text().catch(() => "");
-    return NextResponse.json({ error: `Zafronix API fejl: ${apiRes.status}`, body }, { status: 502 });
+    const isRateLimit = apiRes.status === 429;
+    return NextResponse.json({
+      error: isRateLimit
+        ? `API rate limit nået (429) — du har brugt din daglige kvote på 250 kald. Prøv igen i morgen.`
+        : `Zafronix API fejl: HTTP ${apiRes.status}`,
+      body: body.slice(0, 300),
+    }, { status: 502 });
   }
 
   let apiData: { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];

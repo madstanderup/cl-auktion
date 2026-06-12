@@ -10,6 +10,7 @@ import {
   PLAYER_GAME_ID_KEY,
   type GameAdminSession,
 } from "@/lib/player-storage";
+import { LiveMatchTicker } from "@/components/live-match-ticker";
 
 const SUPERADMIN_EMAIL = "madstanderup@gmail.com";
 
@@ -84,5 +85,10 @@ export default function GameLayout({ children }: { children: React.ReactNode }) 
     );
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <LiveMatchTicker gameId={gameId} />
+      {children}
+    </>
+  );
 }

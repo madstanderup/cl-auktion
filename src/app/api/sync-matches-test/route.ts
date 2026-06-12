@@ -35,12 +35,21 @@ export async function GET() {
       Array.isArray((json as {data?:unknown[]}).data) ? ((json as {data:Record<string,unknown>[]}).data)[0] :
       null;
 
+    const allMatches = Array.isArray(json) ? json as Record<string,unknown>[] :
+      Array.isArray((json as {data?:unknown[]}).data) ? (json as {data:Record<string,unknown>[]}).data :
+      Array.isArray((json as {matches?:unknown[]}).matches) ? (json as {matches:Record<string,unknown>[]}).matches :
+      [];
+
+    // Find en afsluttet kamp til at vise fulde felter inkl. evt. målscorere
+    const finished = allMatches.find((m) => m.status === "finished");
+
     return NextResponse.json({
       ok: true,
       status,
       matchCount: count,
       sampleFields: sample ? Object.keys(sample) : [],
       sample,
+      finishedMatchSample: finished ?? null,
     });
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) });

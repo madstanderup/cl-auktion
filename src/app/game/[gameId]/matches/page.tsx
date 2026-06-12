@@ -143,32 +143,42 @@ function LineupSide({ match, side }: { match: Match; side: "home" | "away" }) {
         </div>
       )}
 
-      {/* Bænk — alle spillere synlige, indskiftede markeres grønt */}
+      {/* Bænk — indskiftede øverst (grøn), uudnyttede nedenunder (grå) */}
       {bench.length > 0 && (
         <div className="border-t border-white/[0.06] pt-1.5 space-y-0.5">
           <p className="text-[0.55rem] uppercase tracking-wider text-slate-600 mb-1">Bænk</p>
-          {bench.map((p, i) => {
+          {[...bench].sort((a, b) => {
+            const aSub = subByPlayerName.has(a.player) ? 0 : 1;
+            const bSub = subByPlayerName.has(b.player) ? 0 : 1;
+            return aSub - bSub;
+          }).map((p, i, arr) => {
             const sub = subByPlayerName.get(p.player);
+            // Separator mellem indskiftede og uudnyttede
+            const prevHasSub = i > 0 && subByPlayerName.has(arr[i - 1].player);
+            const showDivider = !sub && prevHasSub;
             return (
-              <div key={i} className={cn(
-                "flex items-center gap-1.5 text-xs rounded px-0.5 -mx-0.5",
-                sub && "bg-emerald-950/50"
-              )}>
-                <span className={cn("w-5 shrink-0 text-right tabular-nums text-[0.6rem]", sub ? "text-emerald-500" : "text-slate-500")}>
-                  {p.number}
-                </span>
-                <span className={cn("w-6 shrink-0 text-[0.55rem] font-bold uppercase", sub ? "text-emerald-700" : "text-slate-600")}>
-                  {p.position}
-                </span>
-                <span className={cn("flex-1 truncate text-[0.7rem]", sub ? "text-emerald-300 font-medium" : "text-slate-400")}>
-                  {sub && <span className="mr-0.5 text-emerald-500">↑</span>}
-                  {p.player}
-                </span>
-                {sub && (
-                  <span className="shrink-0 text-[0.6rem] tabular-nums text-emerald-700">
-                    {sub.minute}&apos;
+              <div key={i}>
+                {showDivider && <div className="my-1 border-t border-white/[0.04]" />}
+                <div className={cn(
+                  "flex items-center gap-1.5 text-xs rounded px-0.5 -mx-0.5",
+                  sub && "bg-emerald-950/50"
+                )}>
+                  <span className={cn("w-5 shrink-0 text-right tabular-nums text-[0.6rem]", sub ? "text-emerald-500" : "text-slate-600")}>
+                    {p.number}
                   </span>
-                )}
+                  <span className={cn("w-6 shrink-0 text-[0.55rem] font-bold uppercase", sub ? "text-emerald-700" : "text-slate-600")}>
+                    {p.position}
+                  </span>
+                  <span className={cn("flex-1 truncate text-[0.7rem]", sub ? "text-emerald-300 font-medium" : "text-slate-400")}>
+                    {sub && <span className="mr-0.5 text-emerald-500">↑</span>}
+                    {p.player}
+                  </span>
+                  {sub && (
+                    <span className="shrink-0 text-[0.6rem] tabular-nums text-emerald-700">
+                      {sub.minute}&apos;
+                    </span>
+                  )}
+                </div>
               </div>
             );
           })}

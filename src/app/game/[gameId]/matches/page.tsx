@@ -88,10 +88,18 @@ function LineupSide({ match, side }: { match: Match; side: "home" | "away" }) {
   const lineup = match.lineups?.[side] ?? [];
   const starters = lineup.filter((p) => p.starter);
   const bench = lineup.filter((p) => !p.starter);
-  const subs = (match.substitutions ?? []).filter((s) => s.team === side);
   const manager = match.managers?.[side];
   const teamName = side === "home" ? match.homeTeam : match.awayTeam;
   const flag = side === "home" ? match.homeFlag : match.awayFlag;
+
+  // Deduplikér på "ind"-spillerens navn — API sender dubletter
+  const rawSubs = (match.substitutions ?? []).filter((s) => s.team === side);
+  const seenOn = new Set<string>();
+  const subs = rawSubs.filter((s) => { if (seenOn.has(s.on)) return false; seenOn.add(s.on); return true; });
+
+  // Lookups
+  const subByPlayerName = new Map(subs.map((s) => [s.on, s]));
+  const subbedOffNames = new Set(subs.map((s) => s.off));
 
   return (
     <div className="flex-1 min-w-0">
@@ -103,44 +111,57 @@ function LineupSide({ match, side }: { match: Match; side: "home" | "away" }) {
           🧑‍💼 <span className="text-slate-400">{manager}</span>
         </p>
       )}
+
+      {/* Startopstilling — udgåede spillere dæmpes */}
       {starters.length > 0 && (
         <div className="space-y-0.5 mb-2">
-          {starters.map((p, i) => (
-            <div key={i} className="flex items-center gap-1.5 text-xs">
-              <span className="w-5 shrink-0 text-right tabular-nums text-slate-600 text-[0.6rem]">{p.number}</span>
-              <span className="w-6 shrink-0 text-[0.55rem] font-bold uppercase text-slate-600">{p.position}</span>
-              <span className="truncate text-slate-300 text-[0.7rem]">
-                {p.player}{p.captain ? " ©" : ""}
-              </span>
-            </div>
-          ))}
+          {starters.map((p, i) => {
+            const wasSubbed = subbedOffNames.has(p.player);
+            return (
+              <div key={i} className={cn("flex items-center gap-1.5 text-xs", wasSubbed && "opacity-35")}>
+                <span className="w-5 shrink-0 text-right tabular-nums text-slate-600 text-[0.6rem]">{p.number}</span>
+                <span className="w-6 shrink-0 text-[0.55rem] font-bold uppercase text-slate-600">{p.position}</span>
+                <span className={cn("truncate text-[0.7rem]", wasSubbed ? "text-slate-500 line-through" : "text-slate-300")}>
+                  {p.player}{p.captain ? " ©" : ""}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
+
+      {/* Bænk — indskiftede markeres grønt */}
       {bench.length > 0 && (
-        <div className="border-t border-white/[0.06] pt-1.5 mb-2 space-y-0.5">
-          <p className="text-[0.55rem] uppercase tracking-wider text-slate-600 mb-1">Bænk</p>
-          {bench.map((p, i) => (
-            <div key={i} className="flex items-center gap-1.5 text-xs">
-              <span className="w-5 shrink-0 text-right tabular-nums text-slate-700 text-[0.6rem]">{p.number}</span>
-              <span className="w-6 shrink-0 text-[0.55rem] font-bold uppercase text-slate-700">{p.position}</span>
-              <span className="truncate text-slate-500 text-[0.7rem]">{p.player}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      {subs.length > 0 && (
         <div className="border-t border-white/[0.06] pt-1.5 space-y-0.5">
-          <p className="text-[0.55rem] uppercase tracking-wider text-slate-600 mb-1">Udskiftninger</p>
-          {subs.map((s, i) => (
-            <div key={i} className="flex items-center gap-1 text-[0.65rem] text-slate-400">
-              <span className="tabular-nums text-slate-600 shrink-0">{s.minute}&apos;</span>
-              <span className="text-emerald-400 truncate">↑ {s.on}</span>
-              <span className="text-slate-600 shrink-0">/</span>
-              <span className="text-red-400/70 truncate">↓ {s.off}</span>
-            </div>
-          ))}
+          <p className="text-[0.55rem] uppercase tracking-wider text-slate-600 mb-1">Bænk</p>
+          {bench.map((p, i) => {
+            const sub = subByPlayerName.get(p.player);
+            return (
+              <div key={i} className={cn(
+                "flex items-center gap-1.5 text-xs rounded px-0.5 -mx-0.5",
+                sub && "bg-emerald-950/60"
+              )}>
+                <span className={cn("w-5 shrink-0 text-right tabular-nums text-[0.6rem]", sub ? "text-emerald-500" : "text-slate-700")}>
+                  {p.number}
+                </span>
+                <span className={cn("w-6 shrink-0 text-[0.55rem] font-bold uppercase", sub ? "text-emerald-700" : "text-slate-700")}>
+                  {p.position}
+                </span>
+                <span className={cn("flex-1 truncate text-[0.7rem]", sub ? "text-emerald-300 font-medium" : "text-slate-500")}>
+                  {sub && <span className="mr-0.5 text-emerald-500">↑</span>}
+                  {p.player}
+                </span>
+                {sub && (
+                  <span className="shrink-0 text-[0.6rem] tabular-nums text-emerald-700">
+                    {sub.minute}&apos;
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
+
       {starters.length === 0 && <p className="text-xs text-slate-600">Ikke tilgængelig</p>}
     </div>
   );

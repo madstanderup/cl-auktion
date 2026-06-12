@@ -118,6 +118,14 @@ export default function AuctionAdminPage() {
   const [playersLoading, setPlayersLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // Sidebets
+  const [sideBets, setSideBets] = useState<{
+    id: string; bookie_player_id: string; better_player_id: string;
+    description: string; odds: number; stake: number; currency: string;
+    status: string; created_at: string;
+  }[]>([]);
+  const [sideBetDeletingId, setSideBetDeletingId] = useState<string | null>(null);
+
   // Kampresultater
   const [matches, setMatches] = useState<MatchRow[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
@@ -300,13 +308,44 @@ export default function AuctionAdminPage() {
     setTeamNames(names.sort((a, b) => a.localeCompare(b, "da")));
   }, []);
 
+  const loadSideBets = useCallback(async (gameId: string) => {
+    const { data } = await supabase
+      .from("side_bets")
+      .select("id,bookie_player_id,better_player_id,description,odds,stake,currency,status,created_at")
+      .eq("game_id", gameId)
+      .order("created_at", { ascending: false });
+    setSideBets(((data ?? []) as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id),
+      bookie_player_id: String(r.bookie_player_id),
+      better_player_id: String(r.better_player_id),
+      description: String(r.description ?? ""),
+      odds: Number(r.odds),
+      stake: Number(r.stake),
+      currency: String(r.currency),
+      status: String(r.status),
+      created_at: String(r.created_at),
+    })));
+  }, []);
+
+  async function handleDeleteSideBet(betId: string) {
+    if (!session) return;
+    if (!confirm("Slet dette sidebet permanent?")) return;
+    setSideBetDeletingId(betId);
+    const { error } = await supabase.from("side_bets").delete().eq("id", betId);
+    setSideBetDeletingId(null);
+    if (error) { setMessage(`Kunne ikke slette sidebet: ${error.message}`); return; }
+    setMessage("Sidebet slettet.");
+    void loadSideBets(session.gameId);
+  }
+
   useEffect(() => {
     if (!sessionReady || !session) return;
     void loadState(session.gameId);
     void loadPlayers(session.gameId);
     void loadMatches(session.gameId);
     void loadTeamNames(session.gameId);
-  }, [session, sessionReady, loadState, loadPlayers, loadMatches, loadTeamNames]);
+    void loadSideBets(session.gameId);
+  }, [session, sessionReady, loadState, loadPlayers, loadMatches, loadTeamNames, loadSideBets]);
 
   async function handleCreateGame() {
     setLoading(true);
@@ -951,6 +990,65 @@ export default function AuctionAdminPage() {
                   </Button>
                 </li>
               ))}
+            </ul>
+          )}
+        </div>
+
+        {/* ── Sidebets ── */}
+        <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4">
+          <h2 className="text-sm font-semibold text-white">🎲 Sidebets</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Alle væddemål i dette spil. Som admin kan du slette dem.
+          </p>
+          {sideBets.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-400">Ingen sidebets endnu.</p>
+          ) : (
+            <ul className="mt-4 divide-y divide-white/10">
+              {sideBets.map((b) => {
+                const nameOf = (pid: string) => players.find((p) => p.id === pid)?.name ?? "?";
+                const stakeLabel = b.currency === "øl"
+                  ? `${b.stake.toLocaleString("da-DK")} 🍺`
+                  : `${b.stake.toLocaleString("da-DK")} kr`;
+                return (
+                  <li key={b.id} className="flex flex-col gap-2 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="font-medium text-white">
+                        {nameOf(b.bookie_player_id)}
+                        <span className="text-xs text-slate-500"> (bookie) vs </span>
+                        {nameOf(b.better_player_id)}
+                        <span className={cn(
+                          "ml-2 rounded-full px-1.5 py-0.5 text-[0.6rem] font-semibold uppercase tracking-wider",
+                          b.status === "accepted" ? "bg-emerald-500/20 text-emerald-400"
+                          : b.status === "declined" ? "bg-red-500/20 text-red-400"
+                          : "bg-amber-500/20 text-amber-300"
+                        )}>
+                          {b.status === "accepted" ? "Aftalt" : b.status === "declined" ? "Afvist" : "Åben"}
+                        </span>
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        Odds <span className="tabular-nums text-amber-300/80">{b.odds.toLocaleString("da-DK")}</span>
+                        {" · "}Stake <span className="tabular-nums text-slate-300">{stakeLabel}</span>
+                        {b.description ? <> {" · "}<span className="text-slate-400">»{b.description}«</span></> : null}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      className="shrink-0 gap-1"
+                      disabled={sideBetDeletingId !== null}
+                      onClick={() => void handleDeleteSideBet(b.id)}
+                    >
+                      {sideBetDeletingId === b.id ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-4" aria-hidden />
+                      )}
+                      Slet
+                    </Button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

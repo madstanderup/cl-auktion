@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Sparkles, Trophy, Users, ChevronRight } from "lucide-react";
+import { Loader2, ShieldCheck, Sparkles, Trophy, Users, ChevronRight } from "lucide-react";
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,13 @@ type MyGame = {
   auction_status: string | null;
 };
 
+type OwnedGame = {
+  id: string;
+  invite_code: string;
+  label: string | null;
+  admin_secret: string;
+};
+
 export default function Home() {
   const router = useRouter();
   const [inviteCode, setInviteCode] = useState("");
@@ -56,6 +63,7 @@ export default function Home() {
   const [userId, setUserId] = useState<string | null>(null);
   const [myGames, setMyGames] = useState<MyGame[]>([]);
   const [gamesLoading, setGamesLoading] = useState(false);
+  const [ownedGames, setOwnedGames] = useState<OwnedGame[]>([]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -78,7 +86,39 @@ export default function Home() {
   useEffect(() => {
     if (!userId) return;
     void loadMyGames(userId);
+    void loadOwnedGames(userId);
   }, [userId]);
+
+  async function loadOwnedGames(uid: string) {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("games")
+      .select("id, invite_code, label, admin_secret")
+      .eq("created_by", uid)
+      .order("created_at", { ascending: false });
+    setOwnedGames(
+      ((data ?? []) as Record<string, unknown>[])
+        .filter((g) => g.admin_secret)
+        .map((g) => ({
+          id: String(g.id),
+          invite_code: String(g.invite_code),
+          label: g.label ? String(g.label) : null,
+          admin_secret: String(g.admin_secret),
+        }))
+    );
+  }
+
+  function handleEnterAdmin(game: OwnedGame) {
+    try {
+      localStorage.setItem(GAME_ADMIN_SESSION_KEY, JSON.stringify({
+        gameId: game.id,
+        adminSecret: game.admin_secret,
+        inviteCode: game.invite_code,
+        label: game.label,
+      }));
+    } catch { /* ignore */ }
+    router.push("/auction/admin");
+  }
 
   async function loadMyGames(uid: string) {
     setGamesLoading(true);
@@ -529,6 +569,50 @@ export default function Home() {
                 </ul>
               )}
             </section>
+
+            {/* ── Spilejer: admin-adgang til egne spil ── */}
+            {ownedGames.length > 0 && (
+              <section
+                className={cn(
+                  "mt-6 rounded-2xl border border-amber-400/20 bg-slate-950/55 shadow-xl shadow-blue-950/40 backdrop-blur-md",
+                  "ring-1 ring-inset ring-amber-400/[0.08]",
+                )}
+              >
+                <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-4">
+                  <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-amber-200/90">
+                    <ShieldCheck className="size-4 text-amber-400/90" aria-hidden />
+                    Spilejer
+                  </h2>
+                  <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300/70">
+                    {ownedGames.length}
+                  </span>
+                </div>
+                <ul className="divide-y divide-white/[0.06]">
+                  {ownedGames.map((g) => (
+                    <li key={g.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleEnterAdmin(g)}
+                        className="group flex w-full items-center gap-3 px-5 py-4 text-left transition-colors hover:bg-amber-500/[0.06]"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-white">
+                            {g.label ?? `Spil ${g.invite_code}`}
+                          </p>
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            Kode: <span className="font-mono tracking-wider text-slate-400">{g.invite_code}</span>
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-1 text-[0.65rem] font-semibold uppercase tracking-wider text-amber-300">
+                          Admin
+                        </span>
+                        <ChevronRight className="size-4 shrink-0 text-slate-600 transition-colors group-hover:text-amber-400/70" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
           </div>
 
         </div>

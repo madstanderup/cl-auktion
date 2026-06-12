@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Trophy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team, simulateWinProbabilities, type PlayerSim } from "@/lib/wc2026-teams";
+import { formatStake } from "@/lib/side-bets";
 import { cn } from "@/lib/utils";
 
 const STARTING_COINS = 1000;
@@ -612,9 +613,8 @@ export default function SummaryPage() {
                     {sideBets.map((b) => {
                       const bookie = playerNameById.get(b.bookie_player_id) ?? "?";
                       const better = playerNameById.get(b.better_player_id) ?? "?";
-                      const stakeLabel = b.currency === "øl" ? `${Number(b.stake).toLocaleString("da-DK")} 🍺` : `${Number(b.stake).toLocaleString("da-DK")} kr`;
-                      const payout = Number(b.odds) * Number(b.stake);
-                      const payoutLabel = b.currency === "øl" ? `${payout.toLocaleString("da-DK")} 🍺` : `${payout.toLocaleString("da-DK")} kr`;
+                      const stakeLabel = formatStake(b.currency, Number(b.stake));
+                      const payoutLabel = formatStake(b.currency, Number(b.odds) * Number(b.stake));
                       return (
                         <div key={b.id} className="rounded-lg border border-white/[0.07] bg-slate-950/50 px-4 py-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">

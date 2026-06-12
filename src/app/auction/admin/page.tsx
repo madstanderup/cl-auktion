@@ -17,6 +17,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import { formatStake } from "@/lib/side-bets";
 
 type AuctionState = {
   current_team_name: string | null;
@@ -1006,9 +1007,7 @@ export default function AuctionAdminPage() {
             <ul className="mt-4 divide-y divide-white/10">
               {sideBets.map((b) => {
                 const nameOf = (pid: string) => players.find((p) => p.id === pid)?.name ?? "?";
-                const stakeLabel = b.currency === "øl"
-                  ? `${b.stake.toLocaleString("da-DK")} 🍺`
-                  : `${b.stake.toLocaleString("da-DK")} kr`;
+                const stakeLabel = formatStake(b.currency, b.stake);
                 return (
                   <li key={b.id} className="flex flex-col gap-2 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">

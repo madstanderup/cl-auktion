@@ -9,6 +9,7 @@ import {
   PLAYER_ID_KEY,
   type GameAdminSession,
 } from "@/lib/player-storage";
+import { formatStake } from "@/lib/side-bets";
 
 export type SideBet = {
   id: string;
@@ -18,17 +19,13 @@ export type SideBet = {
   description: string;
   odds: number;
   stake: number;
-  currency: "kr" | "øl";
+  currency: string;
   status: "pending" | "accepted" | "declined";
   turn_player_id: string;
   read_by_bookie: boolean;
   read_by_better: boolean;
   created_at: string;
 };
-
-function currencyLabel(c: string, stake: number) {
-  return c === "øl" ? `${stake} 🍺` : `${stake} kr`;
-}
 
 export function SideBetInbox({ gameId }: { gameId: string }) {
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
@@ -247,7 +244,7 @@ export function SideBetInbox({ gameId }: { gameId: string }) {
                     <p className="mt-1.5 text-xs">
                       <span className="font-bold tabular-nums text-amber-300">Odds {Number(bet.odds).toLocaleString("da-DK")}</span>
                       <span className="text-slate-500"> · Stake </span>
-                      <span className="font-bold tabular-nums text-white">{currencyLabel(bet.currency, Number(bet.stake))}</span>
+                      <span className="font-bold tabular-nums text-white">{formatStake(bet.currency, Number(bet.stake))}</span>
                     </p>
 
                     {/* Status / handlinger */}
@@ -307,7 +304,7 @@ export function SideBetInbox({ gameId }: { gameId: string }) {
                           <label className="flex-1">
                             <span className="text-[0.55rem] uppercase tracking-wider text-slate-500">Stake</span>
                             <input
-                              type="number" step="1" min="1"
+                              type="number" step="any" min="0"
                               value={negStake}
                               onChange={(e) => setNegStake(e.target.value)}
                               className="w-full rounded-md border border-white/15 bg-black/40 px-2 py-1 text-xs text-white tabular-nums focus:border-amber-400/50 focus:outline-none"

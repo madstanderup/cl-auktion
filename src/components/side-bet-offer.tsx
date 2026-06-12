@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Dices, Loader2, Send } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { SIDE_BET_CURRENCIES, type SideBetCurrency } from "@/lib/side-bets";
 
 type Player = { id: string; name: string };
 
@@ -20,7 +21,7 @@ export function SideBetOffer({
   const [description, setDescription] = useState("");
   const [odds, setOdds] = useState("");
   const [stake, setStake] = useState("");
-  const [currency, setCurrency] = useState<"kr" | "øl">("kr");
+  const [currency, setCurrency] = useState<SideBetCurrency>("kr");
   const [sending, setSending] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -116,7 +117,7 @@ export function SideBetOffer({
           <label className="block">
             <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500">Stake</span>
             <input
-              type="number" step="1" min="1"
+              type="number" step="any" min="0"
               value={stake}
               onChange={(e) => setStake(e.target.value)}
               placeholder="50"
@@ -129,11 +130,12 @@ export function SideBetOffer({
             <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500">Valuta</span>
             <select
               value={currency}
-              onChange={(e) => setCurrency(e.target.value as "kr" | "øl")}
+              onChange={(e) => setCurrency(e.target.value as SideBetCurrency)}
               className="mt-1 w-full rounded-lg border border-white/15 bg-black/40 px-2 py-2 text-sm text-white focus:border-amber-400/50 focus:outline-none"
             >
-              <option value="kr">Kroner</option>
-              <option value="øl">Øl 🍺</option>
+              {SIDE_BET_CURRENCIES.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
             </select>
           </label>
         </div>

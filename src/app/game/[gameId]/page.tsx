@@ -302,19 +302,37 @@ export default function GamePage() {
             {myPlayer && (
               <section className="rounded-2xl border border-white/10 bg-slate-950/60 p-6 shadow-xl shadow-blue-950/30">
                 <p className="text-lg font-semibold text-white">{myPlayer.name}</p>
-                <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className={cn("mt-4 grid gap-3", isAuctionActive ? "grid-cols-2" : "grid-cols-3")}>
                   <div className="rounded-xl border border-white/10 bg-black/30 p-4">
                     <p className="text-xs uppercase tracking-wider text-slate-500">Turneringspoint</p>
                     <p className="mt-1 text-2xl font-bold tabular-nums text-amber-200">
                       {(computedPoints.get(myPlayer.id) ?? 0).toLocaleString("da-DK")}
                     </p>
                   </div>
-                  <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-                    <p className="text-xs uppercase tracking-wider text-slate-500">Mønter tilbage</p>
-                    <p className="mt-1 text-2xl font-bold tabular-nums text-slate-100">
-                      {myPlayer.coins.toLocaleString("da-DK")}
-                    </p>
-                  </div>
+                  {isAuctionActive ? (
+                    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                      <p className="text-xs uppercase tracking-wider text-slate-500">Mønter tilbage</p>
+                      <p className="mt-1 text-2xl font-bold tabular-nums text-slate-100">
+                        {myPlayer.coins.toLocaleString("da-DK")}
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                        <p className="text-xs uppercase tracking-wider text-slate-500">Placering</p>
+                        <p className="mt-1 text-2xl font-bold tabular-nums text-slate-100">
+                          {sortedPlayers.findIndex((p) => p.id === myPlayer.id) + 1}
+                          <span className="text-sm font-normal text-slate-500"> / {players.length}</span>
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+                        <p className="text-xs uppercase tracking-wider text-slate-500">Hold</p>
+                        <p className="mt-1 text-2xl font-bold tabular-nums text-slate-100">
+                          {allPlayerTeams.find((pt) => pt.player.id === myPlayer.id)?.teams.length ?? 0}
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
               </section>
             )}

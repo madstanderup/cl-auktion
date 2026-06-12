@@ -112,25 +112,38 @@ function LineupSide({ match, side }: { match: Match; side: "home" | "away" }) {
         </p>
       )}
 
-      {/* Startopstilling — udgåede spillere dæmpes */}
+      {/* Startopstilling — udgåede spillere markeres rødt */}
       {starters.length > 0 && (
         <div className="space-y-0.5 mb-2">
           {starters.map((p, i) => {
             const wasSubbed = subbedOffNames.has(p.player);
+            const subMinute = wasSubbed ? subs.find((s) => s.off === p.player)?.minute : undefined;
             return (
-              <div key={i} className={cn("flex items-center gap-1.5 text-xs", wasSubbed && "opacity-35")}>
-                <span className="w-5 shrink-0 text-right tabular-nums text-slate-600 text-[0.6rem]">{p.number}</span>
-                <span className="w-6 shrink-0 text-[0.55rem] font-bold uppercase text-slate-600">{p.position}</span>
-                <span className={cn("truncate text-[0.7rem]", wasSubbed ? "text-slate-500 line-through" : "text-slate-300")}>
+              <div key={i} className={cn(
+                "flex items-center gap-1.5 text-xs rounded px-0.5 -mx-0.5",
+                wasSubbed && "bg-red-950/40"
+              )}>
+                <span className={cn("w-5 shrink-0 text-right tabular-nums text-[0.6rem]", wasSubbed ? "text-red-600" : "text-slate-600")}>
+                  {p.number}
+                </span>
+                <span className={cn("w-6 shrink-0 text-[0.55rem] font-bold uppercase", wasSubbed ? "text-red-800" : "text-slate-600")}>
+                  {p.position}
+                </span>
+                <span className={cn("flex-1 truncate text-[0.7rem]", wasSubbed ? "text-red-400" : "text-slate-300")}>
                   {p.player}{p.captain ? " ©" : ""}
                 </span>
+                {wasSubbed && subMinute != null && (
+                  <span className="shrink-0 text-[0.6rem] tabular-nums text-red-700">
+                    ↓ {subMinute}&apos;
+                  </span>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {/* Bænk — indskiftede markeres grønt */}
+      {/* Bænk — alle spillere synlige, indskiftede markeres grønt */}
       {bench.length > 0 && (
         <div className="border-t border-white/[0.06] pt-1.5 space-y-0.5">
           <p className="text-[0.55rem] uppercase tracking-wider text-slate-600 mb-1">Bænk</p>
@@ -139,15 +152,15 @@ function LineupSide({ match, side }: { match: Match; side: "home" | "away" }) {
             return (
               <div key={i} className={cn(
                 "flex items-center gap-1.5 text-xs rounded px-0.5 -mx-0.5",
-                sub && "bg-emerald-950/60"
+                sub && "bg-emerald-950/50"
               )}>
-                <span className={cn("w-5 shrink-0 text-right tabular-nums text-[0.6rem]", sub ? "text-emerald-500" : "text-slate-700")}>
+                <span className={cn("w-5 shrink-0 text-right tabular-nums text-[0.6rem]", sub ? "text-emerald-500" : "text-slate-500")}>
                   {p.number}
                 </span>
-                <span className={cn("w-6 shrink-0 text-[0.55rem] font-bold uppercase", sub ? "text-emerald-700" : "text-slate-700")}>
+                <span className={cn("w-6 shrink-0 text-[0.55rem] font-bold uppercase", sub ? "text-emerald-700" : "text-slate-600")}>
                   {p.position}
                 </span>
-                <span className={cn("flex-1 truncate text-[0.7rem]", sub ? "text-emerald-300 font-medium" : "text-slate-500")}>
+                <span className={cn("flex-1 truncate text-[0.7rem]", sub ? "text-emerald-300 font-medium" : "text-slate-400")}>
                   {sub && <span className="mr-0.5 text-emerald-500">↑</span>}
                   {p.player}
                 </span>

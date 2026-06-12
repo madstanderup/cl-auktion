@@ -205,6 +205,14 @@ export default function GamePage() {
   const maxTeams = Math.max(...allPlayerTeams.map((pt) => pt.teams.length), 0);
   const roiColor = makeRoiColorFn(allPlayerTeams.flatMap((pt) => pt.teams));
 
+  // Beregn point client-side fra holddata (undgår DB-normaliseringsmismatch)
+  const computedPoints = new Map<string, number>(
+    allPlayerTeams.map((pt) => [pt.player.id, pt.teams.reduce((s, t) => s + t.points, 0)])
+  );
+  const sortedPlayers = [...players].sort(
+    (a, b) => (computedPoints.get(b.id) ?? 0) - (computedPoints.get(a.id) ?? 0)
+  );
+
   return (
     <div className="min-h-screen bg-[#030711] text-slate-100">
       <header className="border-b border-white/[0.08] bg-slate-950/40 px-4 py-4 backdrop-blur-md sm:px-6">
@@ -297,7 +305,7 @@ export default function GamePage() {
                   <div className="rounded-xl border border-white/10 bg-black/30 p-4">
                     <p className="text-xs uppercase tracking-wider text-slate-500">Turneringspoint</p>
                     <p className="mt-1 text-2xl font-bold tabular-nums text-amber-200">
-                      {myPlayer.points.toLocaleString("da-DK")}
+                      {(computedPoints.get(myPlayer.id) ?? 0).toLocaleString("da-DK")}
                     </p>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-black/30 p-4">
@@ -397,7 +405,7 @@ export default function GamePage() {
                 <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Rangliste</h2>
               </div>
               <ul className="divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-950/50">
-                {players.map((p, idx) => (
+                {sortedPlayers.map((p, idx) => (
                   <li
                     key={p.id}
                     className={cn(
@@ -415,7 +423,7 @@ export default function GamePage() {
                       <span className="truncate font-medium text-white">{p.name}</span>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
-                      <span className="tabular-nums font-semibold text-amber-200">{p.points.toLocaleString("da-DK")} pt</span>
+                      <span className="tabular-nums font-semibold text-amber-200">{(computedPoints.get(p.id) ?? 0).toLocaleString("da-DK")} pt</span>
                       <span className="text-xs text-slate-500">{p.coins} 🪙</span>
                     </div>
                   </li>

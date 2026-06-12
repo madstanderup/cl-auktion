@@ -368,26 +368,37 @@ export default function SummaryPage() {
 
                     {/* Holdliste */}
                     <div className="flex-1 bg-slate-950/80 px-3 py-2">
-                      <ul className="space-y-0.5">
+                      <ul className="space-y-1">
                         {p.teams.map((t) => {
-                          const roi = roiLabel(t.currentPoints, t.pricePaid);
+                          const roi  = roiLabel(t.currentPoints, t.pricePaid);
+                          const xRoi = t.pricePaid > 0 ? (t.mean / t.pricePaid).toFixed(1) + "x" : null;
                           return (
-                            <li key={t.name} className="flex items-center justify-between gap-2 py-0.5 text-xs">
-                              <span className="flex items-center gap-1.5 truncate text-slate-200">
-                                <span>{t.flag}</span>
-                                <span className="truncate">{t.name}</span>
-                              </span>
-                              <span className="flex items-center gap-2 shrink-0">
-                                {t.currentPoints > 0 && (
-                                  <span className="tabular-nums text-amber-300/70">{t.currentPoints} pt</span>
-                                )}
-                                <span className="tabular-nums text-slate-500">{t.pricePaid} 🪙</span>
-                                {roi && (
-                                  <span className={cn("font-bold tabular-nums", roiColor(t.currentPoints, t.pricePaid))}>
-                                    {roi}
-                                  </span>
-                                )}
-                              </span>
+                            <li key={t.name} className="py-0.5">
+                              {/* Linje 1: hold + faktiske tal */}
+                              <div className="flex items-center justify-between gap-2 text-xs">
+                                <span className="flex items-center gap-1.5 truncate text-slate-200">
+                                  <span>{t.flag}</span>
+                                  <span className="truncate">{t.name}</span>
+                                </span>
+                                <span className="flex items-center gap-2 shrink-0">
+                                  {t.currentPoints > 0 && (
+                                    <span className="tabular-nums text-amber-300/70">{t.currentPoints} pt</span>
+                                  )}
+                                  <span className="tabular-nums text-slate-500">{t.pricePaid} 🪙</span>
+                                  {roi && (
+                                    <span className={cn("font-bold tabular-nums", roiColor(t.currentPoints, t.pricePaid))}>
+                                      {roi}
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              {/* Linje 2: forventede tal */}
+                              {t.mean > 0 && (
+                                <div className="flex items-center justify-end gap-2 text-[0.6rem] text-slate-600 mt-0.5">
+                                  <span>xP <span className="tabular-nums text-slate-500">{t.mean.toLocaleString("da-DK")}</span></span>
+                                  {xRoi && <span>xROI <span className="tabular-nums text-slate-500">{xRoi}</span></span>}
+                                </div>
+                              )}
                             </li>
                           );
                         })}

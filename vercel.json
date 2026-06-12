@@ -1,1 +1,8 @@
-{}
+{
+  "crons": [
+    {
+      "path": "/api/sync-matches",
+      "schedule": "30 * * * *"
+    }
+  ]
+}

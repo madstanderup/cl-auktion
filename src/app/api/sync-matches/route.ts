@@ -40,6 +40,9 @@ type ApiMatch = {
   cards?: { minute: number; team: "home" | "away"; player: string; color: "yellow" | "red"; addedMinute?: number }[] | null;
   lineups?: { home: unknown[]; away: unknown[] } | null;
   substitutions?: { minute: number; team: "home" | "away"; on: string; off: string }[] | null;
+  managers?: { home: string; away: string } | null;
+  stadium?: string | null;
+  city?: string | null;
 };
 
 type DbMatch = {
@@ -223,6 +226,10 @@ async function runSync(_req: Request) {
           if (m.goals)   updates.goals   = m.goals;
           if (m.cards)   updates.cards   = m.cards;
         }
+        // Altid gem stadion/by/trænere hvis tilgængeligt
+        if (m.stadium)  updates.stadium  = m.stadium;
+        if (m.city)     updates.city     = m.city;
+        if (m.managers) updates.managers = m.managers;
         toUpdate.push({ id: existing.id, updates });
       } else {
         toInsert.push({
@@ -241,6 +248,9 @@ async function runSync(_req: Request) {
           cards:             m.cards ?? null,
           lineups:           m.lineups ?? null,
           substitutions:     isFinished ? (m.substitutions ?? null) : null,
+          managers:          m.managers ?? null,
+          stadium:           m.stadium ?? null,
+          city:              m.city ?? null,
         });
         if (isFinished) pointsRecalculated = true;
       }

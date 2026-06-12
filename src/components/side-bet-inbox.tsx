@@ -1,10 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Handshake, Inbox, Loader2, X } from "lucide-react";
+import { Check, Handshake, Inbox, Loader2, Trash2, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { PLAYER_ID_KEY } from "@/lib/player-storage";
+import {
+  GAME_ADMIN_SESSION_KEY,
+  PLAYER_ID_KEY,
+  type GameAdminSession,
+} from "@/lib/player-storage";
 
 export type SideBet = {
   id: string;
@@ -37,17 +41,26 @@ export function SideBetInbox({ gameId }: { gameId: string }) {
   const [negStake, setNegStake] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    try { setMyPlayerId(localStorage.getItem(PLAYER_ID_KEY)); } catch { /* ignore */ }
-  }, []);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    if (!gameId || !myPlayerId) return;
+    try { setMyPlayerId(localStorage.getItem(PLAYER_ID_KEY)); } catch { /* ignore */ }
+    try {
+      const raw = localStorage.getItem(GAME_ADMIN_SESSION_KEY);
+      if (raw) {
+        const session = JSON.parse(raw) as GameAdminSession;
+        setIsAdmin(session.gameId === gameId);
+      }
+    } catch { /* ignore */ }
+  }, [gameId]);
+
+  useEffect(() => {
+    if (!gameId || (!myPlayerId && !isAdmin)) return;
     void load();
     const interval = setInterval(() => void load(), 30_000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameId, myPlayerId]);
+  }, [gameId, myPlayerId, isAdmin]);
 
   // Luk panelet ved klik udenfor
   useEffect(() => {
@@ -60,13 +73,17 @@ export function SideBetInbox({ gameId }: { gameId: string }) {
   }, [open]);
 
   async function load() {
-    if (!myPlayerId) return;
+    if (!myPlayerId && !isAdmin) return;
+    // Admin ser alle spillets bets; spillere ser kun deres egne
+    let query = supabase.from("side_bets")
+      .select("*")
+      .eq("game_id", gameId)
+      .order("created_at", { ascending: false });
+    if (!isAdmin && myPlayerId) {
+      query = query.or(`bookie_player_id.eq.${myPlayerId},better_player_id.eq.${myPlayerId}`);
+    }
     const [betsRes, playersRes] = await Promise.all([
-      supabase.from("side_bets")
-        .select("*")
-        .eq("game_id", gameId)
-        .or(`bookie_player_id.eq.${myPlayerId},better_player_id.eq.${myPlayerId}`)
-        .order("created_at", { ascending: false }),
+      query,
       supabase.from("players").select("id, name").eq("game_id", gameId),
     ]);
     setBets((betsRes.data ?? []) as SideBet[]);
@@ -130,8 +147,16 @@ export function SideBetInbox({ gameId }: { gameId: string }) {
     void load();
   }
 
-  // Vis kun for spillere
-  if (!myPlayerId) return null;
+  async function deleteBet(bet: SideBet) {
+    if (!confirm("Slet dette sidebet permanent?")) return;
+    setBusy(bet.id);
+    await supabase.from("side_bets").delete().eq("id", bet.id);
+    setBusy(null);
+    void load();
+  }
+
+  // Vis for spillere og spil-admins
+  if (!myPlayerId && !isAdmin) return null;
 
   return (
     <div ref={panelRef} className="fixed right-3 top-3 z-[60]">
@@ -190,13 +215,26 @@ export function SideBetInbox({ gameId }: { gameId: string }) {
                         <span className="text-slate-500"> (bookie) vs </span>
                         <span className="font-semibold text-white">{betterName}</span>
                       </p>
-                      <span className={cn(
-                        "shrink-0 rounded-full px-1.5 py-0.5 text-[0.55rem] font-semibold uppercase tracking-wider",
-                        bet.status === "accepted" ? "bg-emerald-500/20 text-emerald-400"
-                        : bet.status === "declined" ? "bg-red-500/20 text-red-400"
-                        : "bg-amber-500/20 text-amber-300"
-                      )}>
-                        {bet.status === "accepted" ? "Aftalt" : bet.status === "declined" ? "Afvist" : "Åben"}
+                      <span className="flex shrink-0 items-center gap-1">
+                        <span className={cn(
+                          "rounded-full px-1.5 py-0.5 text-[0.55rem] font-semibold uppercase tracking-wider",
+                          bet.status === "accepted" ? "bg-emerald-500/20 text-emerald-400"
+                          : bet.status === "declined" ? "bg-red-500/20 text-red-400"
+                          : "bg-amber-500/20 text-amber-300"
+                        )}>
+                          {bet.status === "accepted" ? "Aftalt" : bet.status === "declined" ? "Afvist" : "Åben"}
+                        </span>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void deleteBet(bet)}
+                            title="Slet sidebet (admin)"
+                            className="rounded p-1 text-slate-600 hover:bg-red-500/15 hover:text-red-400 transition-colors disabled:opacity-50"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        )}
                       </span>
                     </div>
 

@@ -94,6 +94,18 @@ type PlayerResult = {
 
 type SortKey = "mean" | "median";
 
+type SideBetRow = {
+  id: string;
+  bookie_player_id: string;
+  better_player_id: string;
+  description: string;
+  odds: number;
+  stake: number;
+  currency: string;
+  status: string;
+  created_at: string;
+};
+
 function calcVurdering(fairValueSum: number, coinsSpent: number): number {
   if (coinsSpent === 0) return 5;
   const ratio = fairValueSum / coinsSpent;
@@ -107,6 +119,8 @@ export default function SummaryPage() {
   const gameId = params.gameId as string;
 
   const [results, setResults] = useState<PlayerResult[]>([]);
+  const [sideBets, setSideBets] = useState<SideBetRow[]>([]);
+  const [playerNameById, setPlayerNameById] = useState<Map<string, string>>(new Map());
   const [gameLabel, setGameLabel] = useState("");
   const [loading, setLoading] = useState(true);
   const [simulating, setSimulating] = useState(false);
@@ -121,14 +135,20 @@ export default function SummaryPage() {
   async function load() {
     setLoading(true);
 
-    const [gameRes, auctionRes, playersRes, gtRes, bidsRes, matchesRes] = await Promise.all([
+    const [gameRes, auctionRes, playersRes, gtRes, bidsRes, matchesRes, sideBetsRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("auction_state").select("status").eq("game_id", gameId).maybeSingle(),
       supabase.from("players").select("id, name, coins").eq("game_id", gameId),
       supabase.from("game_teams").select("owner_player_id, team_id").eq("game_id", gameId).not("owner_player_id", "is", null),
       supabase.from("auction_room_bids").select("player_id, team_name, amount, bid_phase, created_at").eq("game_id", gameId).order("bid_phase", { ascending: false }).order("created_at", { ascending: false }),
       supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").eq("game_id", gameId),
+      supabase.from("side_bets").select("id,bookie_player_id,better_player_id,description,odds,stake,currency,status,created_at").eq("game_id", gameId).eq("status", "accepted").order("created_at", { ascending: true }),
     ]);
+
+    setSideBets((sideBetsRes.data ?? []) as SideBetRow[]);
+    setPlayerNameById(new Map(
+      ((playersRes.data ?? []) as { id: string; name: string }[]).map((p) => [String(p.id), String(p.name)])
+    ));
 
     const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
     setGameLabel(g?.label ?? g?.invite_code ?? "Spil");
@@ -581,6 +601,48 @@ export default function SummaryPage() {
                   </div>
                 );
               })()}
+
+              {/* Sidebets */}
+              {sideBets.length > 0 && (
+                <div className="rounded-xl border border-purple-500/20 bg-purple-950/20 p-5 sm:col-span-2">
+                  <p className="mb-3 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-purple-300/80">
+                    🎲 Sidebets — indgåede væddemål
+                  </p>
+                  <div className="space-y-2">
+                    {sideBets.map((b) => {
+                      const bookie = playerNameById.get(b.bookie_player_id) ?? "?";
+                      const better = playerNameById.get(b.better_player_id) ?? "?";
+                      const stakeLabel = b.currency === "øl" ? `${Number(b.stake).toLocaleString("da-DK")} 🍺` : `${Number(b.stake).toLocaleString("da-DK")} kr`;
+                      const payout = Number(b.odds) * Number(b.stake);
+                      const payoutLabel = b.currency === "øl" ? `${payout.toLocaleString("da-DK")} 🍺` : `${payout.toLocaleString("da-DK")} kr`;
+                      return (
+                        <div key={b.id} className="rounded-lg border border-white/[0.07] bg-slate-950/50 px-4 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-sm">
+                              <span className="font-semibold text-white">{bookie}</span>
+                              <span className="text-[0.65rem] uppercase tracking-wider text-purple-300/70"> bookie </span>
+                              <span className="text-slate-500">vs</span>
+                              <span className="text-[0.65rem] uppercase tracking-wider text-purple-300/70"> better </span>
+                              <span className="font-semibold text-white">{better}</span>
+                            </p>
+                            <div className="flex items-center gap-3 text-xs">
+                              <span className="font-bold tabular-nums text-amber-300">Odds {Number(b.odds).toLocaleString("da-DK")}</span>
+                              <span className="tabular-nums text-slate-300">Stake {stakeLabel}</span>
+                              <span className="tabular-nums text-emerald-300/80">Gevinst {payoutLabel}</span>
+                            </div>
+                          </div>
+                          {b.description && (
+                            <p className="mt-1 text-xs text-slate-400">»{b.description}«</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3 text-[0.6rem] text-slate-600">
+                    Bookie udbetaler gevinsten (odds × stake) hvis better vinder — ellers beholder bookie staken.
+                  </p>
+                </div>
+              )}
 
               {/* Vindchance oversigt */}
               <div className="rounded-xl border border-white/10 bg-slate-950/70 p-5 sm:col-span-2">

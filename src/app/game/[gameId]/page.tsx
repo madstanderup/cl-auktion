@@ -14,6 +14,7 @@ import {
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
 import { findWC2026Team } from "@/lib/wc2026-teams";
+import { SideBetOffer } from "@/components/side-bet-offer";
 
 const STAGES = [
   { key: "group",          label: "Gruppe" },
@@ -316,6 +317,11 @@ export default function GamePage() {
                   </div>
                 </div>
               </section>
+            )}
+
+            {/* ── Sidebet ── */}
+            {myPlayer && (
+              <SideBetOffer gameId={gameId} myPlayerId={myPlayer.id} players={players} />
             )}
 
             {/* ── Alle spilleres hold ── */}

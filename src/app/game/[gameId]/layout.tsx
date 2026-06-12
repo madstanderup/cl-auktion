@@ -11,6 +11,7 @@ import {
   type GameAdminSession,
 } from "@/lib/player-storage";
 import { LiveMatchTicker } from "@/components/live-match-ticker";
+import { SideBetInbox } from "@/components/side-bet-inbox";
 
 const SUPERADMIN_EMAIL = "madstanderup@gmail.com";
 
@@ -88,6 +89,7 @@ export default function GameLayout({ children }: { children: React.ReactNode }) 
   return (
     <>
       <LiveMatchTicker gameId={gameId} />
+      <SideBetInbox gameId={gameId} />
       {children}
     </>
   );

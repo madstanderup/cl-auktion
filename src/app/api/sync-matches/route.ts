@@ -23,11 +23,10 @@ type ApiMatch = {
   homeScore: number | null;
   awayScore: number | null;
   extraTime: boolean;
-  // Zafronix bruger "penalties" (ikke penaltyShootout)
   penalties: { home: number; away: number } | null;
-  penaltyShootout?: { winner: "home" | "away" } | null; // fallback
+  penaltyShootout?: { winner: "home" | "away" } | null;
   stageNormalized: string;
-  kickoffUtc?: string;  // primær — fuld ISO datetime
+  kickoffUtc?: string;
   date?: string;
   kickoff?: string;
   matchDate?: string;
@@ -37,6 +36,10 @@ type ApiMatch = {
   scheduledAt?: string;
   utcDate?: string;
   status?: string;
+  goals?: { minute: number; team: "home" | "away"; scorer: string }[] | null;
+  cards?: { minute: number; team: "home" | "away"; player: string; color: "yellow" | "red"; addedMinute?: number }[] | null;
+  lineups?: { home: unknown[]; away: unknown[] } | null;
+  substitutions?: { minute: number; team: "home" | "away"; on: string; off: string }[] | null;
 };
 
 type DbMatch = {
@@ -205,11 +208,20 @@ async function runSync(_req: Request) {
         };
         if (matchDate) updates.match_date = matchDate;
         if (isFinished) {
-          updates.home_score  = m.homeScore;
-          updates.away_score  = m.awayScore;
-          updates.result_type = resultType;
-          updates.winner_side = winnerSide;
-          pointsRecalculated  = true;
+          updates.home_score     = m.homeScore;
+          updates.away_score     = m.awayScore;
+          updates.result_type    = resultType;
+          updates.winner_side    = winnerSide;
+          updates.goals          = m.goals ?? null;
+          updates.cards          = m.cards ?? null;
+          updates.lineups        = m.lineups ?? null;
+          updates.substitutions  = m.substitutions ?? null;
+          pointsRecalculated     = true;
+        } else {
+          // Gem lineups selv for ikke-færdige kampe (fx live)
+          if (m.lineups) updates.lineups = m.lineups;
+          if (m.goals)   updates.goals   = m.goals;
+          if (m.cards)   updates.cards   = m.cards;
         }
         toUpdate.push({ id: existing.id, updates });
       } else {
@@ -225,6 +237,10 @@ async function runSync(_req: Request) {
           result_type:       isFinished ? resultType : null,
           winner_side:       isFinished ? winnerSide : null,
           status:            apiStatus,
+          goals:             m.goals ?? null,
+          cards:             m.cards ?? null,
+          lineups:           m.lineups ?? null,
+          substitutions:     isFinished ? (m.substitutions ?? null) : null,
         });
         if (isFinished) pointsRecalculated = true;
       }

@@ -167,12 +167,17 @@ async function runSync(_req: Request) {
   const toInsert: Record<string, unknown>[] = [];
   const toUpdate: { id: string; updates: Record<string, unknown> }[] = [];
   let pointsRecalculated = false;
+  const unmatchedNames = new Set<string>();
 
   for (const m of relevant) {
     const rawHome   = (m.homeTeam ?? "").trim();
     const rawAway   = (m.awayTeam ?? "").trim();
-    const homeTeam  = rawHome ? (findWC2026Team(rawHome)?.name ?? rawHome) : "TBD";
-    const awayTeam  = rawAway ? (findWC2026Team(rawAway)?.name ?? rawAway) : "TBD";
+    const homeResolved = rawHome ? findWC2026Team(rawHome) : undefined;
+    const awayResolved = rawAway ? findWC2026Team(rawAway) : undefined;
+    if (rawHome && !homeResolved) unmatchedNames.add(rawHome);
+    if (rawAway && !awayResolved) unmatchedNames.add(rawAway);
+    const homeTeam  = rawHome ? (homeResolved?.name ?? rawHome) : "TBD";
+    const awayTeam  = rawAway ? (awayResolved?.name ?? rawAway) : "TBD";
     const stage     = STAGE_MAP[m.stageNormalized];
     const matchDate = extractDate(m);
     // Brug API's status-felt: "finished" | "live" | alt → "scheduled"
@@ -261,5 +266,6 @@ async function runSync(_req: Request) {
     relevantFromApi: relevant.length,
     pointsRecalculated,
     sampleFields,
+    unmatchedTeamNames: [...unmatchedNames].sort(),
   });
 }

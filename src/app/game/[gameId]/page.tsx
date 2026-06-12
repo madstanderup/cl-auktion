@@ -13,6 +13,7 @@ import {
   PLAYER_GAME_ID_KEY,
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
+import { findWC2026Team } from "@/lib/wc2026-teams";
 
 const STAGES = [
   { key: "group",          label: "Gruppe" },
@@ -47,15 +48,17 @@ function makeRoiColorFn(allTeams: { points: number; pricePaid: number }[]) {
 }
 
 function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
+  // Normaliser holdnavnet så "South Korea" → "Rep. of Korea" matcher wc_matches
+  const normalName = findWC2026Team(teamName)?.name ?? teamName;
   let total = 0;
   for (const stage of STAGES) {
     const ms = matches.filter(
       (m) => m.stage === stage.key && m.status === "finished" &&
-        (m.home_team === teamName || m.away_team === teamName),
+        (m.home_team === normalName || m.away_team === normalName),
     );
     for (const m of ms) {
       const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
-      const isHome = m.home_team === teamName;
+      const isHome = m.home_team === normalName;
       const myScore = isHome ? hs : as_, opScore = isHome ? as_ : hs;
       const isET = m.result_type === "extra_time" || m.result_type === "penalties";
       let won: boolean, lost: boolean;

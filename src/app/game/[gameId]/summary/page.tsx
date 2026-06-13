@@ -63,6 +63,66 @@ function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
   return total;
 }
 
+const _KNOCKOUT_STAGES = new Set(["round_of_32", "round_of_16", "quarter_final", "semi_final", "final"]);
+
+function matchWinner(m: MatchRow): "home" | "away" | "draw" {
+  if (m.result_type === "penalties" && m.winner_side) return m.winner_side as "home" | "away";
+  const h = m.home_score ?? 0, a = m.away_score ?? 0;
+  if (h > a) return "home";
+  if (a > h) return "away";
+  return "draw";
+}
+
+/**
+ * Returnerer sæt af kanoniske holdnavne (lowercase) der ikke kan score flere point:
+ *  (a) tabt en afgjort knockout-kamp
+ *  (b) gruppespil er færdigt (round_of_32 fuldt trukket) og holdet gik ikke videre
+ *  (c) finalen er spillet → alle hold er færdige
+ */
+function computeDoneTeams(matches: MatchRow[]): Set<string> {
+  const norm = (n: string) => (findWC2026Team(n)?.name ?? n).toLowerCase();
+  const done = new Set<string>();
+
+  // (a) Knockout-tabere
+  for (const m of matches) {
+    if (m.status !== "finished" || !_KNOCKOUT_STAGES.has(m.stage)) continue;
+    const w = matchWinner(m);
+    if (w === "home") done.add(norm(m.away_team));
+    else if (w === "away") done.add(norm(m.home_team));
+  }
+
+  // (b) Gruppe-udryddede: når round_of_32 er fuldt trukket, er hold der ikke
+  //     optræder i nogen knockout-kamp slået ud i gruppespillet
+  const r32 = matches.filter((m) => m.stage === "round_of_32");
+  const r32Drawn =
+    r32.length >= 32 &&
+    r32.every((m) => m.home_team && m.away_team && m.home_team !== "TBD" && m.away_team !== "TBD");
+  if (r32Drawn) {
+    const advanced = new Set<string>();
+    for (const m of matches) {
+      if (!_KNOCKOUT_STAGES.has(m.stage)) continue;
+      if (m.home_team && m.home_team !== "TBD") advanced.add(norm(m.home_team));
+      if (m.away_team && m.away_team !== "TBD") advanced.add(norm(m.away_team));
+    }
+    for (const m of matches) {
+      if (m.stage !== "group") continue;
+      for (const t of [m.home_team, m.away_team]) {
+        if (t && t !== "TBD" && !advanced.has(norm(t))) done.add(norm(t));
+      }
+    }
+  }
+
+  // (c) Finalen spillet → turneringen er slut
+  if (matches.some((m) => m.stage === "final" && m.status === "finished")) {
+    for (const m of matches) {
+      if (m.home_team && m.home_team !== "TBD") done.add(norm(m.home_team));
+      if (m.away_team && m.away_team !== "TBD") done.add(norm(m.away_team));
+    }
+  }
+
+  return done;
+}
+
 function roiLabel(pts: number, bid: number) {
   if (bid <= 0) return pts > 0 ? "∞" : null;
   return (pts / bid).toFixed(1) + "x";
@@ -236,11 +296,21 @@ export default function SummaryPage() {
       };
     });
 
-    // Simulér vindersandsynligheder
+    // Simulér vindersandsynligheder.
+    // Hold der er færdige/slået ud låses til deres faktiske point (stdDev 0);
+    // hold der stadig er med beholder før-turnerings-fordelingen, men med
+    // allerede scorede point som gulv.
     setSimulating(true);
+    const doneTeams = computeDoneTeams(allMatches);
+    const normName = (n: string) => (findWC2026Team(n)?.name ?? n).toLowerCase();
     const sims: PlayerSim[] = partial.map((p) => ({
       playerId: p.playerId,
-      teams: p.teams.map((t) => ({ mean: t.mean, stdDev: t.stdDev })),
+      teams: p.teams.map((t) => {
+        if (doneTeams.has(normName(t.name))) {
+          return { mean: t.currentPoints, stdDev: 0 };
+        }
+        return { mean: t.mean, stdDev: t.stdDev, floor: t.currentPoints };
+      }),
     }));
     // Kør async så UI ikke fryser
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -684,7 +754,7 @@ export default function SummaryPage() {
                     })}
                 </div>
                 <p className="mt-3 text-center text-[0.65rem] text-slate-600">
-                  Vindchance er beregnet ud fra {sortKey === "mean" ? "gennemsnit" : "median"}-fordeling per hold · WM 2026 · Ikke officiel forudsigelse
+                  Tager højde for allerede spillede kampe — slåede hold er låst til deres faktiske point · WM 2026 · Ikke officiel forudsigelse
                 </p>
               </div>
 

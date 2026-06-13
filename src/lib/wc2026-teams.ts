@@ -81,7 +81,12 @@ function normalRandom(): number {
 
 export type PlayerSim = {
   playerId: string;
-  teams: { mean: number; stdDev: number }[];
+  /**
+   * floor: et hold simuleres aldrig under dette antal point (fx allerede scorede
+   * point for et hold der stadig er med). For hold der er færdige/slået ud sættes
+   * mean = faktiske point og stdDev = 0, så bidraget er låst.
+   */
+  teams: { mean: number; stdDev: number; floor?: number }[];
 };
 
 /** Kører N simuleringer og returnerer vindersandsynlighed pr. spiller (0-1). */
@@ -98,7 +103,8 @@ export function simulateWinProbabilities(
     for (const p of players) {
       let score = 0;
       for (const t of p.teams) {
-        score += Math.max(0, t.mean + t.stdDev * normalRandom());
+        const draw = t.mean + t.stdDev * normalRandom();
+        score += Math.max(t.floor ?? 0, draw);
       }
       if (score > bestScore) { bestScore = score; bestId = p.playerId; }
     }
@@ -140,7 +146,8 @@ export function simulateStandings(
     for (let p = 0; p < players.length; p++) {
       let score = 0;
       for (const t of players[p].teams) {
-        score += Math.max(0, t.mean + t.stdDev * normalRandom());
+        const draw = t.mean + t.stdDev * normalRandom();
+        score += Math.max(t.floor ?? 0, draw);
       }
       scores[p] = score;
       if (score > bestScore) { bestScore = score; bestIdx = p; }

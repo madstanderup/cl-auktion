@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Trophy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { findWC2026Team, simulateWinProbabilities, type PlayerSim } from "@/lib/wc2026-teams";
+import { findWC2026Team, simulateStandings, type PlayerSim } from "@/lib/wc2026-teams";
 import { formatStake } from "@/lib/side-bets";
 import { cn } from "@/lib/utils";
 
@@ -120,6 +120,7 @@ export default function SummaryPage() {
   const gameId = params.gameId as string;
 
   const [results, setResults] = useState<PlayerResult[]>([]);
+  const [pairwise, setPairwise] = useState<Record<string, Record<string, number>>>({});
   const [sideBets, setSideBets] = useState<SideBetRow[]>([]);
   const [playerNameById, setPlayerNameById] = useState<Map<string, string>>(new Map());
   const [gameLabel, setGameLabel] = useState("");
@@ -243,8 +244,9 @@ export default function SummaryPage() {
     }));
     // Kør async så UI ikke fryser
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const winProbs = simulateWinProbabilities(sims, 8000);
+    const { winProb: winProbs, pairwise: pw } = simulateStandings(sims, 8000);
     setSimulating(false);
+    setPairwise(pw);
 
     const full: PlayerResult[] = partial.map((p) => ({
       ...p,
@@ -685,6 +687,81 @@ export default function SummaryPage() {
                   Vindchance er beregnet ud fra {sortKey === "mean" ? "gennemsnit" : "median"}-fordeling per hold · WM 2026 · Ikke officiel forudsigelse
                 </p>
               </div>
+
+              {/* Indbyrdes matrix */}
+              {results.length >= 2 && Object.keys(pairwise).length > 0 && (() => {
+                const order = [...results].sort((a, b) => b.winProb - a.winProb);
+                const cellColor = (prob: number): string => {
+                  // 0% rød → 50% neutral → 100% grøn
+                  if (prob >= 0.5) {
+                    const t = (prob - 0.5) / 0.5; // 0..1
+                    const a = 0.1 + t * 0.35;
+                    return `rgba(16, 185, 129, ${a.toFixed(2)})`; // emerald
+                  } else {
+                    const t = (0.5 - prob) / 0.5; // 0..1
+                    const a = 0.1 + t * 0.35;
+                    return `rgba(239, 68, 68, ${a.toFixed(2)})`; // red
+                  }
+                };
+
+                return (
+                  <div className="rounded-xl border border-white/10 bg-slate-950/70 p-5 sm:col-span-2">
+                    <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-emerald-300/80">
+                      ⚔️ Indbyrdes sandsynligheder
+                    </p>
+                    <p className="mb-4 text-[0.65rem] text-slate-500">
+                      Hver celle viser sandsynligheden for at <span className="text-slate-300">rækkens</span> spiller slutter højere end <span className="text-slate-300">kolonnens</span> spiller.
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          <tr>
+                            <th className="sticky left-0 z-10 bg-slate-950/70 px-2 py-2 text-left text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500">
+                              Slutter bedre end →
+                            </th>
+                            {order.map((p) => (
+                              <th key={p.playerId} className="px-2 py-2 text-center text-[0.65rem] font-semibold text-slate-300 whitespace-nowrap">
+                                {p.playerName}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {order.map((rowP) => (
+                            <tr key={rowP.playerId}>
+                              <td className="sticky left-0 z-10 bg-slate-950/70 px-2 py-2 text-left text-[0.65rem] font-semibold text-slate-300 whitespace-nowrap">
+                                {rowP.playerName}
+                              </td>
+                              {order.map((colP) => {
+                                if (rowP.playerId === colP.playerId) {
+                                  return (
+                                    <td key={colP.playerId} className="px-2 py-2 text-center text-slate-700 bg-white/[0.02]">
+                                      —
+                                    </td>
+                                  );
+                                }
+                                const prob = pairwise[rowP.playerId]?.[colP.playerId] ?? 0;
+                                return (
+                                  <td
+                                    key={colP.playerId}
+                                    className="px-2 py-2 text-center tabular-nums font-semibold text-white"
+                                    style={{ backgroundColor: cellColor(prob) }}
+                                  >
+                                    {Math.round(prob * 100)}%
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-3 text-center text-[0.65rem] text-slate-600">
+                      Fx: {order[0]?.playerName} slutter bedre end {order[1]?.playerName} i {Math.round((pairwise[order[0]?.playerId]?.[order[1]?.playerId] ?? 0) * 100)}% af de simulerede turneringer
+                    </p>
+                  </div>
+                );
+              })()}
 
             </div>
           </div>

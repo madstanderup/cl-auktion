@@ -107,3 +107,60 @@ export function simulateWinProbabilities(
 
   return Object.fromEntries(Object.entries(wins).map(([k, v]) => [k, v / N]));
 }
+
+export type SimulationResult = {
+  /** Vindersandsynlighed pr. spiller (0-1). */
+  winProb: Record<string, number>;
+  /** pairwise[a][b] = sandsynlighed for at spiller a slutter strengt bedre end b (0-1). */
+  pairwise: Record<string, Record<string, number>>;
+};
+
+/**
+ * Kører N simuleringer og returnerer både vindersandsynligheder og den parvise
+ * matrix (P(a > b)) i én kørsel.
+ */
+export function simulateStandings(
+  players: PlayerSim[],
+  N = 8000,
+): SimulationResult {
+  const ids = players.map((p) => p.playerId);
+  const wins: Record<string, number> = {};
+  const beats: Record<string, Record<string, number>> = {};
+  for (const a of ids) {
+    wins[a] = 0;
+    beats[a] = {};
+    for (const b of ids) beats[a][b] = 0;
+  }
+
+  const scores = new Array<number>(players.length);
+
+  for (let i = 0; i < N; i++) {
+    let bestScore = -1;
+    let bestIdx = -1;
+    for (let p = 0; p < players.length; p++) {
+      let score = 0;
+      for (const t of players[p].teams) {
+        score += Math.max(0, t.mean + t.stdDev * normalRandom());
+      }
+      scores[p] = score;
+      if (score > bestScore) { bestScore = score; bestIdx = p; }
+    }
+    if (bestIdx >= 0) wins[ids[bestIdx]]++;
+
+    // Parvis sammenligning
+    for (let a = 0; a < players.length; a++) {
+      for (let b = 0; b < players.length; b++) {
+        if (a !== b && scores[a] > scores[b]) beats[ids[a]][ids[b]]++;
+      }
+    }
+  }
+
+  const winProb = Object.fromEntries(ids.map((id) => [id, wins[id] / N]));
+  const pairwise: Record<string, Record<string, number>> = {};
+  for (const a of ids) {
+    pairwise[a] = {};
+    for (const b of ids) pairwise[a][b] = beats[a][b] / N;
+  }
+
+  return { winProb, pairwise };
+}

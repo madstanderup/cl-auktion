@@ -15,6 +15,42 @@ import {
   PLAYER_NAME_KEY,
 } from "@/lib/player-storage";
 import { cn } from "@/lib/utils";
+import { findWC2026Team } from "@/lib/wc2026-teams";
+
+const POINT_STAGES = ["group", "round_of_32", "round_of_16", "quarter_final", "semi_final", "final"];
+const POINT_STAGE_BONUS: Record<string, number> = {
+  round_of_32: 100, round_of_16: 200, quarter_final: 400, semi_final: 600, final: 800,
+};
+
+type PointMatch = {
+  home_team: string; away_team: string; stage: string;
+  home_score: number | null; away_score: number | null;
+  result_type: string | null; winner_side: string | null; status: string;
+};
+
+function calcTeamPoints(teamName: string, matches: PointMatch[]): number {
+  const normalName = findWC2026Team(teamName)?.name ?? teamName;
+  let total = 0;
+  for (const stage of POINT_STAGES) {
+    const ms = matches.filter((m) => m.stage === stage && m.status === "finished" && (m.home_team === normalName || m.away_team === normalName));
+    for (const m of ms) {
+      const isHome = m.home_team === normalName;
+      const myScore = isHome ? (m.home_score ?? 0) : (m.away_score ?? 0);
+      const opScore = isHome ? (m.away_score ?? 0) : (m.home_score ?? 0);
+      let won = myScore > opScore;
+      if (m.result_type === "penalties" && m.winner_side) won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
+      if (stage === "group") {
+        total += myScore === opScore ? 50 : won ? 150 : 0;
+      } else {
+        if (isET) { total += 50; if (won) total += 50; } else if (won) total += 150;
+        total += POINT_STAGE_BONUS[stage] ?? 0;
+        if (stage === "final" && won) total += 1000;
+      }
+    }
+  }
+  return total;
+}
 
 const STAR_POSITIONS: ReadonlyArray<{ top: string; left: string; opacity: number; size: number }> = [
   { top: "8%", left: "12%", opacity: 0.35, size: 1 },
@@ -134,10 +170,13 @@ export default function Home() {
 
       const gameIds = playerRows.map((p) => String(p.game_id));
 
-      // Fetch game info and auction states in parallel
-      const [gamesRes, auctionRes] = await Promise.all([
+      // Fetch game info, auction states, matches og ejerskaber parallelt
+      const [gamesRes, auctionRes, matchesRes, gtRes, teamsRes] = await Promise.all([
         supabase.from("games").select("id, invite_code, label").in("id", gameIds),
         supabase.from("auction_state").select("game_id, status").in("game_id", gameIds),
+        supabase.from("wc_matches").select("game_id,home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").in("game_id", gameIds),
+        supabase.from("game_teams").select("game_id, team_id, owner_player_id").in("game_id", gameIds).not("owner_player_id", "is", null),
+        supabase.from("teams").select("id, name"),
       ]);
 
       const gameMap = new Map<string, { invite_code: string; label: string | null }>();
@@ -150,6 +189,34 @@ export default function Home() {
         auctionMap.set(String(a.game_id), a.status as string);
       }
 
+      // Kampe pr. spil
+      const matchesByGame = new Map<string, PointMatch[]>();
+      for (const m of (matchesRes.data ?? []) as Record<string, unknown>[]) {
+        const gid = String(m.game_id);
+        const arr = matchesByGame.get(gid) ?? [];
+        arr.push({
+          home_team: String(m.home_team), away_team: String(m.away_team), stage: String(m.stage),
+          home_score: m.home_score != null ? Number(m.home_score) : null,
+          away_score: m.away_score != null ? Number(m.away_score) : null,
+          result_type: m.result_type ? String(m.result_type) : null,
+          winner_side: m.winner_side ? String(m.winner_side) : null,
+          status: String(m.status),
+        });
+        matchesByGame.set(gid, arr);
+      }
+
+      const teamNameById = new Map(((teamsRes.data ?? []) as Record<string, unknown>[]).map((t) => [String(t.id), String(t.name)]));
+
+      // Beregn point pr. spiller: sum over ejede holds point
+      const pointsByPlayer = new Map<string, number>();
+      for (const gt of (gtRes.data ?? []) as Record<string, unknown>[]) {
+        const pid = String(gt.owner_player_id);
+        const tname = teamNameById.get(String(gt.team_id));
+        if (!tname) continue;
+        const matches = matchesByGame.get(String(gt.game_id)) ?? [];
+        pointsByPlayer.set(pid, (pointsByPlayer.get(pid) ?? 0) + calcTeamPoints(tname, matches));
+      }
+
       const games: MyGame[] = playerRows.map((p) => {
         const gid = String(p.game_id);
         const gInfo = gameMap.get(gid);
@@ -157,7 +224,7 @@ export default function Home() {
           player_id: String(p.id),
           player_name: p.name as string,
           coins: p.coins as number,
-          points: p.points as number,
+          points: pointsByPlayer.get(String(p.id)) ?? 0,
           game_id: gid,
           invite_code: gInfo?.invite_code ?? "",
           label: gInfo?.label ?? null,

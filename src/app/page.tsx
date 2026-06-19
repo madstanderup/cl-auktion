@@ -288,8 +288,15 @@ export default function Home() {
       }
       if (!existingId) {
         const { data } = await supabase
-          .from("players").select("id").eq("game_id", gameId).eq("name", trimmed).maybeSingle();
-        if (data?.id) existingId = String(data.id);
+          .from("players").select("id, user_id").eq("game_id", gameId).eq("name", trimmed).maybeSingle();
+        if (data?.id) {
+          existingId = String(data.id);
+          // Knyt spilleren permanent til den indloggede bruger hvis den ikke
+          // allerede er taget — så spillet dukker op under "Mine spil" fremover
+          if (uid && !data.user_id) {
+            await supabase.from("players").update({ user_id: uid }).eq("id", data.id);
+          }
+        }
       }
 
       const playerId = existingId ?? await (async () => {

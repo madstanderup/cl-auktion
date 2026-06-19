@@ -3,6 +3,23 @@
 -- Spillere: Jens, Engbjerg (ejer/eksisterende bruger), Bob, Mortensen
 -- Kør HELE filen i Supabase SQL Editor. Ejer: jesper.engbjerg@gmail.com
 -- ───────────────────────────────────────────────────────────────────────────
+
+-- 0) Sørg for at auction_state-status tillader 'finished' (idempotent)
+do $cfix$
+begin
+  if exists (
+    select 1 from pg_constraint
+    where conname = 'auction_state_status_check'
+      and conrelid = 'public.auction_state'::regclass
+  ) then
+    alter table public.auction_state drop constraint auction_state_status_check;
+  end if;
+end $cfix$;
+
+alter table public.auction_state
+  add constraint auction_state_status_check
+  check (status in ('waiting', 'bidding', 'revealed', 'tie_breaker', 'finished'));
+
 do $$
 declare
   v_owner   uuid;
@@ -35,9 +52,9 @@ begin
   insert into public.game_teams (game_id, team_id)
   select v_game, t.id from public.teams t;
 
-  -- Auktionstilstand (afsluttes til sidst via RPC)
+  -- Auktionstilstand: afsluttet (auktionen er kørt i hånden)
   insert into public.auction_state (game_id, status, updated_at)
-  values (v_game, 'waiting', now());
+  values (v_game, 'finished', now());
 
   -- Spillere (coins = resterende beløb). Engbjerg knyttes til auth-bruger.
   insert into public.players (name, coins, points, game_id, user_id) values ('Engbjerg', 37, 0, v_game, v_owner);
@@ -115,9 +132,6 @@ begin
     insert into public.auction_room_bids (player_id, team_name, amount, game_id, round_id, bid_phase, created_at)
     values (v_player, rec.catalog_name, rec.price, v_game, gen_random_uuid(), 1, now() + (v_order || ' seconds')::interval);
   end loop;
-
-  -- Afslut auktionen via samme RPC som appen bruger
-  perform public.admin_finish_auction(v_game, v_secret);
 
   raise notice 'OK — spil "VM 2026" oprettet. Invitationskode: %  (game_id: %)', v_code, v_game;
 end $$;

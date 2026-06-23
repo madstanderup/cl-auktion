@@ -37,16 +37,26 @@ const SHARE_STAGE_BONUS: Record<string, number> = {
   round_of_32: 100, round_of_16: 200, quarter_final: 400, semi_final: 600, final: 800,
 };
 
-/** Point for ét hold i én afsluttet kamp (spejler matches-siden). */
+/** Point for ét hold i én afsluttet kamp (avancement-bonus kun til taberen). */
 function matchPointsForTeam(m: MatchRow, isHome: boolean): number {
   if (m.status !== "finished" || m.home_score === null || m.away_score === null) return 0;
   const my = isHome ? m.home_score : m.away_score;
   const opp = isHome ? m.away_score : m.home_score;
+  let won = my > opp;
+  let lost = my < opp;
+  if (m.result_type === "penalties" && m.winner_side) {
+    won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+    lost = !won;
+  }
+  const isET = m.result_type === "extra_time" || m.result_type === "penalties";
   let pts = 0;
-  if (my > opp) pts += m.result_type === "normal_time" ? 150 : 50;
-  else if (my === opp) pts += 50;
-  if (m.stage !== "group") pts += SHARE_STAGE_BONUS[m.stage] ?? 0;
-  if (m.stage === "final" && my > opp) pts += 1000;
+  if (m.stage === "group") {
+    pts += my === opp ? 50 : won ? 150 : 0;
+  } else {
+    if (isET) { pts += 50; if (won) pts += 50; } else if (won) pts += 150;
+    if (lost) pts += SHARE_STAGE_BONUS[m.stage] ?? 0; // avancement-bonus kun til taberen
+    if (m.stage === "final" && won) pts += 1000;
+  }
   return pts;
 }
 type PlayerTeams = { player: Player; teams: { name: string; points: number; pricePaid: number }[] };

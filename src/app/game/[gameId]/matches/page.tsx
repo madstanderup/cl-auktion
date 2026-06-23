@@ -65,11 +65,21 @@ function calcMatchPoints(match: Match, isHome: boolean): number {
   if (match.status !== "finished" || match.homeScore === null || match.awayScore === null) return 0;
   const myScore  = isHome ? match.homeScore : match.awayScore;
   const oppScore = isHome ? match.awayScore : match.homeScore;
+  let won = myScore > oppScore;
+  let lost = myScore < oppScore;
+  if (match.resultType === "penalties" && match.winnerSide) {
+    won = (isHome && match.winnerSide === "home") || (!isHome && match.winnerSide === "away");
+    lost = !won;
+  }
+  const isET = match.resultType === "extra_time" || match.resultType === "penalties";
   let pts = 0;
-  if (myScore > oppScore) pts += match.resultType === "normal_time" ? 150 : 50;
-  else if (myScore === oppScore) pts += 50;
-  if (match.stage !== "group") pts += STAGE_BONUS[match.stage] ?? 0;
-  if (match.stage === "final" && myScore > oppScore) pts += 1000;
+  if (match.stage === "group") {
+    pts += myScore === oppScore ? 50 : won ? 150 : 0;
+  } else {
+    if (isET) { pts += 50; if (won) pts += 50; } else if (won) pts += 150;
+    if (lost) pts += STAGE_BONUS[match.stage] ?? 0; // avancement-bonus kun til taberen
+    if (match.stage === "final" && won) pts += 1000;
+  }
   return pts;
 }
 

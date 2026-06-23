@@ -28,13 +28,17 @@ function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
       const myScore = isHome ? (m.home_score ?? 0) : (m.away_score ?? 0);
       const opScore = isHome ? (m.away_score ?? 0) : (m.home_score ?? 0);
       let won = myScore > opScore;
-      if (m.result_type === "penalties" && m.winner_side) won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+      let lost = myScore < opScore;
+      if (m.result_type === "penalties" && m.winner_side) {
+        won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+        lost = !won;
+      }
       const isET = m.result_type === "extra_time" || m.result_type === "penalties";
       if (stage === "group") {
         total += myScore === opScore ? 50 : won ? 150 : 0;
       } else {
         if (isET) { total += 50; if (won) total += 50; } else if (won) total += 150;
-        total += STAGE_BONUS[stage] ?? 0;
+        if (lost) total += STAGE_BONUS[stage] ?? 0; // avancement-bonus kun til taberen
         if (stage === "final" && won) total += 1000;
       }
     }
@@ -46,11 +50,21 @@ function matchPointsForTeam(m: MatchRow, isHome: boolean): number {
   if (m.status !== "finished" || m.home_score === null || m.away_score === null) return 0;
   const my = isHome ? m.home_score : m.away_score;
   const opp = isHome ? m.away_score : m.home_score;
+  let won = my > opp;
+  let lost = my < opp;
+  if (m.result_type === "penalties" && m.winner_side) {
+    won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+    lost = !won;
+  }
+  const isET = m.result_type === "extra_time" || m.result_type === "penalties";
   let pts = 0;
-  if (my > opp) pts += m.result_type === "normal_time" ? 150 : 50;
-  else if (my === opp) pts += 50;
-  if (m.stage !== "group") pts += STAGE_BONUS[m.stage] ?? 0;
-  if (m.stage === "final" && my > opp) pts += 1000;
+  if (m.stage === "group") {
+    pts += my === opp ? 50 : won ? 150 : 0;
+  } else {
+    if (isET) { pts += 50; if (won) pts += 50; } else if (won) pts += 150;
+    if (lost) pts += STAGE_BONUS[m.stage] ?? 0; // avancement-bonus kun til taberen
+    if (m.stage === "final" && won) pts += 1000;
+  }
   return pts;
 }
 

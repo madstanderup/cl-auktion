@@ -39,13 +39,17 @@ function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
       const myScore = isHome ? (m.home_score ?? 0) : (m.away_score ?? 0);
       const opScore = isHome ? (m.away_score ?? 0) : (m.home_score ?? 0);
       let won = myScore > opScore;
-      if (m.result_type === "penalties" && m.winner_side) won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+      let lost = myScore < opScore;
+      if (m.result_type === "penalties" && m.winner_side) {
+        won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
+        lost = !won;
+      }
       const isET = m.result_type === "extra_time" || m.result_type === "penalties";
       if (stage === "group") {
         total += myScore === opScore ? 50 : won ? 150 : 0;
       } else {
         if (isET) { total += 50; if (won) total += 50; } else if (won) total += 150;
-        total += STAGE_BONUS[stage] ?? 0; // both teams get stage bonus
+        if (lost) total += STAGE_BONUS[stage] ?? 0; // avancement-bonus kun til taberen
         if (stage === "final" && won) total += 1000;
       }
     }

@@ -30,7 +30,25 @@ type MatchRow = {
   home_team: string; away_team: string; stage: string;
   home_score: number | null; away_score: number | null;
   result_type: string | null; winner_side: string | null; status: string;
+  match_date?: string | null;
 };
+
+const SHARE_STAGE_BONUS: Record<string, number> = {
+  round_of_32: 100, round_of_16: 200, quarter_final: 400, semi_final: 600, final: 800,
+};
+
+/** Point for ét hold i én afsluttet kamp (spejler matches-siden). */
+function matchPointsForTeam(m: MatchRow, isHome: boolean): number {
+  if (m.status !== "finished" || m.home_score === null || m.away_score === null) return 0;
+  const my = isHome ? m.home_score : m.away_score;
+  const opp = isHome ? m.away_score : m.home_score;
+  let pts = 0;
+  if (my > opp) pts += m.result_type === "normal_time" ? 150 : 50;
+  else if (my === opp) pts += 50;
+  if (m.stage !== "group") pts += SHARE_STAGE_BONUS[m.stage] ?? 0;
+  if (m.stage === "final" && my > opp) pts += 1000;
+  return pts;
+}
 type PlayerTeams = { player: Player; teams: { name: string; points: number; pricePaid: number }[] };
 
 function roiLabel(points: number, bid: number): string | null {
@@ -97,6 +115,8 @@ export default function GamePage() {
 
   const [gameLabel, setGameLabel] = useState<string>("");
   const [shareDone, setShareDone] = useState(false);
+  const [matchRows, setMatchRows] = useState<MatchRow[]>([]);
+  const [ownerByTeam, setOwnerByTeam] = useState<Map<string, string>>(new Map());
   const [auctionStatus, setAuctionStatus] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [allPlayerTeams, setAllPlayerTeams] = useState<PlayerTeams[]>([]);
@@ -130,7 +150,7 @@ export default function GamePage() {
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("players").select("id, name, coins, points").eq("game_id", gameId).order("points", { ascending: false }),
       supabase.from("auction_state").select("status").eq("game_id", gameId).maybeSingle(),
-      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").eq("game_id", gameId),
+      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status,match_date").eq("game_id", gameId),
       supabase.from("game_teams").select("team_id, owner_player_id").eq("game_id", gameId).not("owner_player_id", "is", null),
       supabase.from("auction_room_bids").select("player_id, team_name, amount, bid_phase, created_at").eq("game_id", gameId).order("bid_phase", { ascending: false }).order("created_at", { ascending: false }),
     ]);
@@ -154,7 +174,9 @@ export default function GamePage() {
       result_type: m.result_type ? String(m.result_type) : null,
       winner_side: m.winner_side ? String(m.winner_side) : null,
       status: String(m.status),
+      match_date: m.match_date ? String(m.match_date) : null,
     }));
+    setMatchRows(matches);
 
     // Hent holdnavne for alle ejede hold
     const teamIds = [...new Set((gtRes.data ?? []).map((r: Record<string, unknown>) => String(r.team_id)))];
@@ -182,8 +204,10 @@ export default function GamePage() {
       winnerBidByTeam.set(`${pid}|${tname}`, winBid);
     }
 
-    // Byg: playerId → teams
+    // Byg: playerId → teams  og  normaliseret holdnavn → ejernavn (til deling)
     const teamsByOwner = new Map<string, { name: string; points: number; pricePaid: number }[]>();
+    const ownerMap = new Map<string, string>();
+    const playerNameById = new Map(playerList.map((p) => [p.id, p.name]));
     for (const row of (gtRes.data ?? []) as Record<string, unknown>[]) {
       const pid = String(row.owner_player_id);
       const tname = teamNameById.get(String(row.team_id));
@@ -191,7 +215,11 @@ export default function GamePage() {
       const arr = teamsByOwner.get(pid) ?? [];
       arr.push({ name: tname, points: calcTeamPoints(tname, matches), pricePaid: winnerBidByTeam.get(`${pid}|${tname}`) ?? 0 });
       teamsByOwner.set(pid, arr);
+      const canon = (findWC2026Team(tname)?.name ?? tname).toLowerCase();
+      const ownerName = playerNameById.get(pid);
+      if (ownerName) ownerMap.set(canon, ownerName);
     }
+    setOwnerByTeam(ownerMap);
 
     // Sortér hold per spiller: point desc, derefter navn
     const allPT: PlayerTeams[] = playerList.map((p) => ({
@@ -216,13 +244,54 @@ export default function GamePage() {
   );
 
   const MEDALS = ["🥇", "🥈", "🥉"];
+
+  /** Seneste kampdag med afsluttede kampe → resultater + dagens topscorer. */
+  function buildLatestDaySection(): string {
+    const finished = matchRows.filter((m) => m.status === "finished" && m.match_date);
+    if (finished.length === 0) return "";
+
+    // Find seneste dato (lokal) med afsluttede kampe
+    const dayKey = (iso: string) => new Date(iso).toLocaleDateString("sv-SE");
+    const latestKey = finished
+      .map((m) => dayKey(m.match_date as string))
+      .sort()
+      .at(-1)!;
+    const dayMatches = finished.filter((m) => dayKey(m.match_date as string) === latestKey);
+    if (dayMatches.length === 0) return "";
+
+    const flag = (name: string) => findWC2026Team(name)?.flag ?? "";
+    const resultLines = dayMatches.map((m) => {
+      const et = m.result_type === "penalties" ? " (e.s.)" : m.result_type === "extra_time" ? " (e.f.)" : "";
+      return `${flag(m.home_team)} ${m.home_team} ${m.home_score}–${m.away_score} ${m.away_team} ${flag(m.away_team)}${et}`.trim();
+    });
+
+    // Dagens topscorer (sum point pr. ejer fra dagens kampe)
+    const dayPts = new Map<string, number>();
+    for (const m of dayMatches) {
+      const hOwner = ownerByTeam.get((findWC2026Team(m.home_team)?.name ?? m.home_team).toLowerCase());
+      const aOwner = ownerByTeam.get((findWC2026Team(m.away_team)?.name ?? m.away_team).toLowerCase());
+      const hp = matchPointsForTeam(m, true);
+      const ap = matchPointsForTeam(m, false);
+      if (hOwner && hp > 0) dayPts.set(hOwner, (dayPts.get(hOwner) ?? 0) + hp);
+      if (aOwner && ap > 0) dayPts.set(aOwner, (dayPts.get(aOwner) ?? 0) + ap);
+    }
+    const top = [...dayPts.entries()].sort((a, b) => b[1] - a[1])[0];
+
+    const d = new Date(latestKey);
+    const dateLabel = d.toLocaleDateString("da-DK", { day: "numeric", month: "short" });
+
+    let section = `\n\n⚽ Kampe ${dateLabel}\n${resultLines.join("\n")}`;
+    if (top) section += `\n\n🔥 Dagens topscorer: ${top[0]} +${top[1].toLocaleString("da-DK")} pt`;
+    return section;
+  }
+
   function buildShareText(): string {
     const lines = sortedPlayers.map((p, i) => {
       const pts = (computedPoints.get(p.id) ?? 0).toLocaleString("da-DK");
       const prefix = MEDALS[i] ?? `${i + 1}.`;
       return `${prefix} ${p.name} — ${pts} pt`;
     });
-    return `🏆 ${gameLabel} — Stilling\n\n${lines.join("\n")}`;
+    return `🏆 ${gameLabel} — Stilling\n\n${lines.join("\n")}${buildLatestDaySection()}`;
   }
 
   async function shareStandings() {

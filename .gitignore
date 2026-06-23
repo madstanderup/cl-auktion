@@ -41,3 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# Lokale scratch-data (holdet import)
+holdet_data/
+Holdet_VM2026_spillere.xlsx

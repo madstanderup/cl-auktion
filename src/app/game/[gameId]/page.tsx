@@ -400,7 +400,8 @@ export default function GamePage() {
             <button
               type="button"
               onClick={() => void shareStandings()}
-              className={cn(buttonVariants({ size: "sm" }), "bg-amber-400 text-slate-950 hover:bg-amber-300 font-semibold text-xs")}
+              disabled={loading || sortedPlayers.length === 0}
+              className={cn(buttonVariants({ size: "sm" }), "bg-amber-400 text-slate-950 hover:bg-amber-300 font-semibold text-xs disabled:opacity-50 disabled:pointer-events-none")}
             >
               {shareDone ? <Check className="size-3.5 mr-1" /> : <Share2 className="size-3.5 mr-1" />}
               {shareDone ? "Kopieret" : "Del"}

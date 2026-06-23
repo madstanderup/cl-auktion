@@ -3,92 +3,64 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { supabase } from "@/lib/supabase";
+import { findWC2026Team } from "@/lib/wc2026-teams";
+import { cn } from "@/lib/utils";
 
-const STAGES = [
-  { key: "group",          label: "Gruppe" },
+const KNOCKOUT_STAGES = [
   { key: "round_of_32",   label: "1/16" },
   { key: "round_of_16",   label: "1/8" },
-  { key: "quarter_final", label: "KV" },
-  { key: "semi_final",    label: "SF" },
+  { key: "quarter_final", label: "1/4" },
+  { key: "semi_final",    label: "1/2" },
   { key: "final",         label: "Finale" },
 ];
-
-type Team = {
-  id: string;
-  name: string;
-  flag_emoji: string | null;
-  owner_name: string | null;
+const STAGE_BONUS: Record<string, number> = {
+  round_of_32: 100, round_of_16: 200, quarter_final: 400, semi_final: 600, final: 800,
 };
 
 type MatchRow = {
-  id: string;
-  home_team: string;
-  away_team: string;
-  stage: string;
-  home_score: number | null;
-  away_score: number | null;
-  result_type: string | null;
-  winner_side: string | null;
-  status: string;
+  home_team: string; away_team: string; stage: string;
+  home_score: number | null; away_score: number | null;
+  result_type: string | null; winner_side: string | null; status: string;
+  match_date: string | null;
 };
 
-function resolveWonLost(m: MatchRow, teamName: string): { won: boolean; lost: boolean } {
-  const isHome = m.home_team === teamName;
-  // For penalties: score can be tied — use winner_side if available
+type Row = {
+  drawOrder: number;
+  teamName: string;
+  flag: string;
+  owner: string | null;
+  group: (number | null)[]; // 3 group matches; null = ikke spillet
+  knockout: (number | null)[]; // 5 knockout-runder
+  total: number;
+  betaling: number;
+  roi: number;
+};
+
+function wonLost(m: MatchRow, isHome: boolean): { won: boolean; lost: boolean; draw: boolean } {
   if (m.result_type === "penalties" && m.winner_side) {
     const won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
-    return { won, lost: !won };
+    return { won, lost: !won, draw: false };
   }
   const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
   const my = isHome ? hs : as_, op = isHome ? as_ : hs;
-  return { won: my > op, lost: my < op };
+  return { won: my > op, lost: my < op, draw: my === op };
 }
 
-function calcPoints(teams: Team[], matches: MatchRow[]) {
-  const matrix = new Map<string, Map<string, number>>();
+function groupMatchPoints(m: MatchRow, isHome: boolean): number {
+  const { won, draw } = wonLost(m, isHome);
+  return draw ? 50 : won ? 150 : 0;
+}
 
-  for (const team of teams) {
-    const stageMap = new Map<string, number>();
-    for (const stage of STAGES) {
-      const ms = matches.filter(
-        (m) => m.stage === stage.key &&
-               m.status === "finished" &&
-               (m.home_team === team.name || m.away_team === team.name)
-      );
-      let pts = 0;
-      for (const m of ms) {
-        const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
-        const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-        const { won, lost } = resolveWonLost(m, team.name);
-
-        if (stage.key === "group") {
-          if (hs === as_) pts += 50;
-          else if (won) pts += 150;
-        } else {
-          if (isET) {
-            pts += 50; // begge hold: 50 for uafgjort i ordinær tid
-            if (won) pts += 50; // kun vinderen: 50 bonus for at vinde i ET/straffe
-          } else if (won) {
-            pts += 150;
-          }
-          // Avancement-bonus til taberen
-          if (lost) {
-            if (stage.key === "round_of_32") pts += 100;
-            else if (stage.key === "round_of_16") pts += 200;
-            else if (stage.key === "quarter_final") pts += 400;
-            else if (stage.key === "semi_final") pts += 600;
-            else if (stage.key === "final") pts += 800;
-          }
-          // Finalevinder
-          if (stage.key === "final" && won) pts += 1000;
-        }
-      }
-      stageMap.set(stage.key, pts);
-    }
-    matrix.set(team.name, stageMap);
-  }
-  return matrix;
+function knockoutMatchPoints(m: MatchRow, isHome: boolean): number {
+  const { won, lost } = wonLost(m, isHome);
+  const isET = m.result_type === "extra_time" || m.result_type === "penalties";
+  let pts = 0;
+  if (isET) { pts += 50; if (won) pts += 50; }
+  else if (won) pts += 150;
+  if (lost) pts += STAGE_BONUS[m.stage] ?? 0; // avancement-bonus til taberen
+  if (m.stage === "final" && won) pts += 1000;
+  return pts;
 }
 
 export default function PointsPage() {
@@ -96,92 +68,135 @@ export default function PointsPage() {
   const router = useRouter();
   const gameId = params.gameId as string;
 
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [matches, setMatches] = useState<MatchRow[]>([]);
+  const [rows, setRows] = useState<Row[]>([]);
   const [gameLabel, setGameLabel] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!gameId) return;
-    void load();
-  }, [gameId]);
+  useEffect(() => { if (gameId) void load(); }, [gameId]);
 
   async function load() {
     setLoading(true);
-    const supabase = createClient();
 
-    const [gameRes, teamsRes, matchesRes] = await Promise.all([
+    const [gameRes, gtRes, teamsRes, playersRes, matchesRes, bidsRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
-      supabase.from("game_teams")
-        .select("team_id, owner_id, teams(id, name, flag_emoji), players(id, name)")
-        .eq("game_id", gameId),
-      supabase.from("wc_matches")
-        .select("id, home_team, away_team, stage, home_score, away_score, result_type, winner_side, status")
-        .eq("game_id", gameId),
+      supabase.from("game_teams").select("team_id, owner_player_id").eq("game_id", gameId),
+      supabase.from("teams").select("id, name"),
+      supabase.from("players").select("id, name").eq("game_id", gameId),
+      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status,match_date").eq("game_id", gameId),
+      supabase.from("auction_room_bids").select("player_id, team_name, amount, created_at").eq("game_id", gameId),
     ]);
 
     const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
     setGameLabel(g?.label ?? g?.invite_code ?? "Spil");
 
-    const teamList: Team[] = (teamsRes.data ?? []).map((gt: Record<string, unknown>) => {
-      const t = gt.teams as { id: string; name: string; flag_emoji: string | null } | null;
-      const owner = gt.players as { id: string; name: string } | null;
-      return {
-        id: t?.id ?? String(gt.team_id),
-        name: t?.name ?? "?",
-        flag_emoji: t?.flag_emoji ?? null,
-        owner_name: owner?.name ?? null,
-      };
-    });
+    const teamNameById = new Map(((teamsRes.data ?? []) as Record<string, unknown>[]).map((t) => [String(t.id), String(t.name)]));
+    const playerNameById = new Map(((playersRes.data ?? []) as Record<string, unknown>[]).map((p) => [String(p.id), String(p.name)]));
 
-    const matchList: MatchRow[] = (matchesRes.data ?? []).map((m: Record<string, unknown>) => ({
-      id: String(m.id),
-      home_team: String(m.home_team),
-      away_team: String(m.away_team),
-      stage: String(m.stage),
+    const matches: MatchRow[] = ((matchesRes.data ?? []) as Record<string, unknown>[]).map((m) => ({
+      home_team: String(m.home_team), away_team: String(m.away_team), stage: String(m.stage),
       home_score: m.home_score != null ? Number(m.home_score) : null,
       away_score: m.away_score != null ? Number(m.away_score) : null,
       result_type: m.result_type ? String(m.result_type) : null,
       winner_side: m.winner_side ? String(m.winner_side) : null,
       status: String(m.status),
+      match_date: m.match_date ? String(m.match_date) : null,
     }));
 
-    setTeams(teamList);
-    setMatches(matchList);
+    const bids = (bidsRes.data ?? []) as { player_id: string; team_name: string; amount: number; created_at: string }[];
+    // Trækningsrækkefølge: tidligste bud pr. holdnavn (katalognavn)
+    const firstBidAt = new Map<string, string>();
+    for (const b of bids) {
+      const prev = firstBidAt.get(b.team_name);
+      if (!prev || b.created_at < prev) firstBidAt.set(b.team_name, b.created_at);
+    }
+
+    const built: Row[] = [];
+    for (const gt of (gtRes.data ?? []) as Record<string, unknown>[]) {
+      const teamName = teamNameById.get(String(gt.team_id));
+      if (!teamName) continue;
+      const ownerId = gt.owner_player_id ? String(gt.owner_player_id) : null;
+      const owner = ownerId ? (playerNameById.get(ownerId) ?? null) : null;
+      const canon = findWC2026Team(teamName)?.name ?? teamName;
+
+      const teamMatches = matches.filter((m) => m.home_team === canon || m.away_team === canon);
+
+      // Gruppekampe i datorækkefølge → 3 kolonner
+      const groupMs = teamMatches
+        .filter((m) => m.stage === "group")
+        .sort((a, b) => (a.match_date ?? "").localeCompare(b.match_date ?? ""));
+      const group: (number | null)[] = [0, 1, 2].map((i) => {
+        const m = groupMs[i];
+        if (!m || m.status !== "finished") return null;
+        return groupMatchPoints(m, m.home_team === canon);
+      });
+
+      // Knockout-runder
+      const knockout: (number | null)[] = KNOCKOUT_STAGES.map((s) => {
+        const m = teamMatches.find((mm) => mm.stage === s.key);
+        if (!m || m.status !== "finished") return null;
+        return knockoutMatchPoints(m, m.home_team === canon);
+      });
+
+      const total = [...group, ...knockout].reduce((s: number, v) => s + (v ?? 0), 0);
+
+      // Betaling: ejerens bud på holdet (katalognavn)
+      const ownerBids = ownerId ? bids.filter((b) => b.team_name === teamName && b.player_id === ownerId) : [];
+      const betaling = ownerBids.length > 0 ? Math.max(...ownerBids.map((b) => b.amount)) : 0;
+      const roi = betaling > 0 ? total / betaling : 0;
+
+      built.push({
+        drawOrder: 0,
+        teamName,
+        flag: findWC2026Team(teamName)?.flag ?? "🏳",
+        owner,
+        group,
+        knockout,
+        total,
+        betaling,
+        roi,
+      });
+    }
+
+    // Sortér efter trækningsrækkefølge (tidligste bud først); hold uden bud sidst
+    built.sort((a, b) => {
+      const ta = firstBidAt.get(a.teamName);
+      const tb = firstBidAt.get(b.teamName);
+      if (ta && tb) return ta.localeCompare(tb);
+      if (ta) return -1;
+      if (tb) return 1;
+      return a.teamName.localeCompare(b.teamName, "da");
+    });
+    built.forEach((r, i) => { r.drawOrder = i + 1; });
+
+    setRows(built);
     setLoading(false);
   }
 
-  const matrix = calcPoints(teams, matches);
+  const COLS = ["1. runde", "2. runde", "3. runde", ...KNOCKOUT_STAGES.map((s) => s.label)];
 
-  const sortedTeams = [...teams].sort((a, b) => {
-    const aTotal = [...(matrix.get(a.name)?.values() ?? [])].reduce((s, v) => s + v, 0);
-    const bTotal = [...(matrix.get(b.name)?.values() ?? [])].reduce((s, v) => s + v, 0);
-    return bTotal - aTotal;
-  });
-
-  // Group teams by owner for grouping (optional sort: also sort within owner by total)
-  const ownerOrder = Array.from(
-    new Map(sortedTeams.map((t) => [t.owner_name ?? "—", true])).keys()
-  );
+  function cell(v: number | null) {
+    if (v === null) return <span className="text-slate-700">·</span>;
+    if (v === 0) return <span className="text-slate-600">0</span>;
+    return <span className="font-semibold text-amber-200/90">{v}</span>;
+  }
 
   return (
     <div className="min-h-screen bg-[#030711] text-slate-100">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
         {/* Header */}
         <div className="mb-6 flex flex-wrap items-center gap-4">
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={() => router.push(`/game/${gameId}`)}
             className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 transition-colors"
           >
             <ArrowLeft className="size-4" />
-            Tilbage
+            Spilside
           </button>
           <div className="flex-1">
             <h1 className="text-lg font-semibold text-white">{gameLabel} — Pointoversigt</h1>
             <p className="mt-0.5 text-xs text-slate-500">
-              Hold × runde · taberen af knockout-kampe får avancement-bonus
+              Hold i trækningsrækkefølge · point pr. runde · avancement-bonus tilfalder det tabende hold
             </p>
           </div>
           <button
@@ -198,71 +213,41 @@ export default function PointsPage() {
           <div className="flex justify-center py-24">
             <Loader2 className="size-8 animate-spin text-amber-400/60" />
           </div>
-        ) : teams.length === 0 ? (
+        ) : rows.length === 0 ? (
           <p className="text-center text-sm text-slate-500 py-16">Ingen hold i dette spil.</p>
         ) : (
           <div className="overflow-x-auto rounded-2xl border border-white/[0.08] bg-slate-950/55 shadow-xl backdrop-blur-md">
             <table className="w-full min-w-max border-collapse text-xs">
               <thead>
                 <tr className="border-b border-white/[0.08]">
-                  <th className="sticky left-0 z-10 bg-slate-950/95 px-4 py-3 text-left text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500 min-w-[140px]">
-                    Hold
-                  </th>
-                  <th className="px-4 py-3 text-left text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500 min-w-[100px]">
-                    Ejer
-                  </th>
-                  {STAGES.map((s) => (
-                    <th key={s.key} className="px-4 py-3 text-center text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500 min-w-[60px]">
-                      {s.label}
-                    </th>
+                  <th className="sticky left-0 z-10 bg-slate-950/95 px-3 py-3 text-left text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500 w-8">#</th>
+                  <th className="sticky left-8 z-10 bg-slate-950/95 px-3 py-3 text-left text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500 min-w-[150px]">Hold</th>
+                  <th className="px-3 py-3 text-left text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500 min-w-[90px]">Ejer</th>
+                  {COLS.map((c) => (
+                    <th key={c} className="px-3 py-3 text-center text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500 min-w-[54px]">{c}</th>
                   ))}
-                  <th className="px-4 py-3 text-center text-[0.65rem] font-semibold uppercase tracking-wider text-amber-500/80 min-w-[60px]">
-                    Total
-                  </th>
+                  <th className="px-3 py-3 text-center text-[0.6rem] font-bold uppercase tracking-wider text-amber-400/90 min-w-[60px]">Total</th>
+                  <th className="px-3 py-3 text-center text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500 min-w-[60px]">Betaling</th>
+                  <th className="px-3 py-3 text-center text-[0.6rem] font-semibold uppercase tracking-wider text-emerald-400/80 min-w-[54px]">ROI</th>
                 </tr>
               </thead>
               <tbody>
-                {ownerOrder.map((ownerName) => {
-                  const ownerTeams = sortedTeams.filter((t) => (t.owner_name ?? "—") === ownerName);
-                  return ownerTeams.map((team, idx) => {
-                    const stageMap = matrix.get(team.name);
-                    const total = [...(stageMap?.values() ?? [])].reduce((s, v) => s + v, 0);
-                    const isFirstInGroup = idx === 0;
-                    return (
-                      <tr
-                        key={team.id}
-                        className={`border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors ${isFirstInGroup && idx === 0 ? "border-t border-white/[0.06]" : ""}`}
-                      >
-                        <td className="sticky left-0 z-10 bg-slate-950/95 px-4 py-3 font-medium text-slate-200 whitespace-nowrap">
-                          {team.flag_emoji && <span className="mr-1.5">{team.flag_emoji}</span>}
-                          {team.name}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          {isFirstInGroup ? (
-                            <span className="font-medium text-slate-300">{ownerName}</span>
-                          ) : (
-                            <span className="text-slate-600">{ownerName}</span>
-                          )}
-                        </td>
-                        {STAGES.map((s) => {
-                          const pts = stageMap?.get(s.key) ?? 0;
-                          return (
-                            <td key={s.key} className="px-4 py-3 text-center">
-                              {pts > 0 ? (
-                                <span className="font-semibold text-amber-200/90">{pts}</span>
-                              ) : (
-                                <span className="text-slate-700">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                        <td className="px-4 py-3 text-center font-bold text-amber-300">
-                          {total > 0 ? total : <span className="text-slate-700">0</span>}
-                        </td>
-                      </tr>
-                    );
-                  });
-                })}
+                {rows.map((r) => (
+                  <tr key={r.teamName} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+                    <td className="sticky left-0 z-10 bg-slate-950/95 px-3 py-2.5 text-slate-600 tabular-nums">{r.drawOrder}</td>
+                    <td className="sticky left-8 z-10 bg-slate-950/95 px-3 py-2.5 font-medium text-slate-200 whitespace-nowrap">
+                      <span className="mr-1.5">{r.flag}</span>{r.teamName}
+                    </td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-slate-400">{r.owner ?? <span className="text-slate-700">—</span>}</td>
+                    {r.group.map((v, i) => <td key={`g${i}`} className="px-3 py-2.5 text-center tabular-nums">{cell(v)}</td>)}
+                    {r.knockout.map((v, i) => <td key={`k${i}`} className="px-3 py-2.5 text-center tabular-nums">{cell(v)}</td>)}
+                    <td className="px-3 py-2.5 text-center font-bold tabular-nums text-amber-300">{r.total.toLocaleString("da-DK")}</td>
+                    <td className="px-3 py-2.5 text-center tabular-nums text-slate-400">{r.betaling > 0 ? r.betaling.toLocaleString("da-DK") : <span className="text-slate-700">—</span>}</td>
+                    <td className={cn("px-3 py-2.5 text-center font-semibold tabular-nums", r.betaling > 0 ? "text-emerald-300/90" : "text-slate-700")}>
+                      {r.betaling > 0 ? r.roi.toLocaleString("da-DK", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

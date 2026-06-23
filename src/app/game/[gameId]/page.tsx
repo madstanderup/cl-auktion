@@ -295,7 +295,7 @@ export default function GamePage() {
   }
 
   async function shareStandings() {
-    const url = typeof window !== "undefined" ? window.location.href : "";
+    const url = typeof window !== "undefined" ? `${window.location.origin}/s/${gameId}` : "";
     const text = buildShareText();
     const shareData = { title: `${gameLabel} — Stilling`, text, url };
     try {

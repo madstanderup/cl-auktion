@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, CalendarDays, Gavel, Loader2, ShieldCheck, Table2, TrendingUp, Trophy, Users } from "lucide-react";
+import { ArrowLeft, CalendarDays, Check, Gavel, Loader2, Share2, ShieldCheck, Table2, TrendingUp, Trophy, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -96,6 +96,7 @@ export default function GamePage() {
   const gameId = params.gameId as string;
 
   const [gameLabel, setGameLabel] = useState<string>("");
+  const [shareDone, setShareDone] = useState(false);
   const [auctionStatus, setAuctionStatus] = useState<string | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [allPlayerTeams, setAllPlayerTeams] = useState<PlayerTeams[]>([]);
@@ -213,6 +214,37 @@ export default function GamePage() {
   const sortedPlayers = [...players].sort(
     (a, b) => (computedPoints.get(b.id) ?? 0) - (computedPoints.get(a.id) ?? 0)
   );
+
+  const MEDALS = ["🥇", "🥈", "🥉"];
+  function buildShareText(): string {
+    const lines = sortedPlayers.map((p, i) => {
+      const pts = (computedPoints.get(p.id) ?? 0).toLocaleString("da-DK");
+      const prefix = MEDALS[i] ?? `${i + 1}.`;
+      return `${prefix} ${p.name} — ${pts} pt`;
+    });
+    return `🏆 ${gameLabel} — Stilling\n\n${lines.join("\n")}`;
+  }
+
+  async function shareStandings() {
+    const url = typeof window !== "undefined" ? window.location.href : "";
+    const text = buildShareText();
+    const shareData = { title: `${gameLabel} — Stilling`, text, url };
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+    } catch {
+      // Bruger annullerede eller share fejlede — fald tilbage til kopiering
+    }
+    try {
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      setShareDone(true);
+      setTimeout(() => setShareDone(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#030711] text-slate-100">
@@ -427,6 +459,16 @@ export default function GamePage() {
               <div className="flex items-center gap-2 mb-3">
                 <Users className="size-4 text-blue-400/80" />
                 <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Rangliste</h2>
+                {sortedPlayers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void shareStandings()}
+                    className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-white/[0.08] hover:text-white"
+                  >
+                    {shareDone ? <Check className="size-3.5 text-emerald-400" /> : <Share2 className="size-3.5" />}
+                    {shareDone ? "Kopieret" : "Del stilling"}
+                  </button>
+                )}
               </div>
               <ul className="divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-950/50">
                 {sortedPlayers.map((p, idx) => (

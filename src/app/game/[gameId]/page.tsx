@@ -456,10 +456,48 @@ export default function GamePage() {
               </section>
             )}
 
-            {/* ── Sidebet ── */}
-            {myPlayer && (
-              <SideBetOffer gameId={gameId} myPlayerId={myPlayer.id} players={players} />
-            )}
+            {/* ── Rangliste ── */}
+            <section>
+              <div className="flex items-center gap-2 mb-3">
+                <Users className="size-4 text-blue-400/80" />
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Rangliste</h2>
+                {sortedPlayers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void shareStandings()}
+                    className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-white/[0.08] hover:text-white"
+                  >
+                    {shareDone ? <Check className="size-3.5 text-emerald-400" /> : <Share2 className="size-3.5" />}
+                    {shareDone ? "Kopieret" : "Del stilling"}
+                  </button>
+                )}
+              </div>
+              <ul className="divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-950/50">
+                {sortedPlayers.map((p, idx) => (
+                  <li
+                    key={p.id}
+                    className={cn(
+                      "flex items-center justify-between gap-3 px-4 py-3 text-sm",
+                      p.id === myPlayer?.id && "bg-amber-500/10",
+                    )}
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className={cn(
+                        "w-6 shrink-0 text-center font-mono text-xs",
+                        idx === 0 ? "text-amber-300 font-bold" : idx === 1 ? "text-slate-300" : idx === 2 ? "text-amber-600" : "text-slate-600"
+                      )}>
+                        {idx + 1}
+                      </span>
+                      <span className="truncate font-medium text-white">{p.name}</span>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="tabular-nums font-semibold text-amber-200">{(computedPoints.get(p.id) ?? 0).toLocaleString("da-DK")} pt</span>
+                      <span className="text-xs text-slate-500">{p.coins} 🪙</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
 
             {/* ── Alle spilleres hold ── */}
             {allPlayerTeams.some((pt) => pt.teams.length > 0) && (
@@ -541,48 +579,10 @@ export default function GamePage() {
               </section>
             )}
 
-            {/* ── Rangliste ── */}
-            <section>
-              <div className="flex items-center gap-2 mb-3">
-                <Users className="size-4 text-blue-400/80" />
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Rangliste</h2>
-                {sortedPlayers.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void shareStandings()}
-                    className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-white/[0.08] hover:text-white"
-                  >
-                    {shareDone ? <Check className="size-3.5 text-emerald-400" /> : <Share2 className="size-3.5" />}
-                    {shareDone ? "Kopieret" : "Del stilling"}
-                  </button>
-                )}
-              </div>
-              <ul className="divide-y divide-white/10 rounded-xl border border-white/10 bg-slate-950/50">
-                {sortedPlayers.map((p, idx) => (
-                  <li
-                    key={p.id}
-                    className={cn(
-                      "flex items-center justify-between gap-3 px-4 py-3 text-sm",
-                      p.id === myPlayer?.id && "bg-amber-500/10",
-                    )}
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span className={cn(
-                        "w-6 shrink-0 text-center font-mono text-xs",
-                        idx === 0 ? "text-amber-300 font-bold" : idx === 1 ? "text-slate-300" : idx === 2 ? "text-amber-600" : "text-slate-600"
-                      )}>
-                        {idx + 1}
-                      </span>
-                      <span className="truncate font-medium text-white">{p.name}</span>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="tabular-nums font-semibold text-amber-200">{(computedPoints.get(p.id) ?? 0).toLocaleString("da-DK")} pt</span>
-                      <span className="text-xs text-slate-500">{p.coins} 🪙</span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            {/* ── Sidebet ── */}
+            {myPlayer && (
+              <SideBetOffer gameId={gameId} myPlayerId={myPlayer.id} players={players} />
+            )}
 
           </div>
         )}

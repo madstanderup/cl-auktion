@@ -387,6 +387,14 @@ export default function GamePage() {
             >
               📖 Regler
             </Link>
+            <button
+              type="button"
+              onClick={() => void shareStandings()}
+              className={cn(buttonVariants({ size: "sm" }), "bg-amber-400 text-slate-950 hover:bg-amber-300 font-semibold text-xs")}
+            >
+              {shareDone ? <Check className="size-3.5 mr-1" /> : <Share2 className="size-3.5 mr-1" />}
+              {shareDone ? "Kopieret" : "Del"}
+            </button>
           </div>
         </div>
       </header>

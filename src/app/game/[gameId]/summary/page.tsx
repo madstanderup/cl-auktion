@@ -6,6 +6,7 @@ import { ArrowLeft, Loader2, Trophy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team, simulateStandings, type PlayerSim } from "@/lib/wc2026-teams";
 import { computeEliminatedTeams } from "@/lib/tournament";
+import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
 import { formatStake } from "@/lib/side-bets";
 import { cn } from "@/lib/utils";
 
@@ -251,18 +252,45 @@ export default function SummaryPage() {
     setSimulating(true);
     const eliminated = computeEliminatedTeams(allMatches);
     const normName = (n: string) => (findWC2026Team(n)?.name ?? n).toLowerCase();
-    const sims: PlayerSim[] = partial.map((p) => ({
-      playerId: p.playerId,
-      teams: p.teams.map((t) => {
-        if (eliminated.has(normName(t.name))) {
-          return { mean: t.currentPoints, stdDev: 0 };
-        }
-        return { mean: t.mean, stdDev: t.stdDev, floor: t.currentPoints };
-      }),
-    }));
     // Kør async så UI ikke fryser
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    const { winProb: winProbs, pairwise: pw } = simulateStandings(sims, 8000);
+
+    let winProbs: Record<string, number>;
+    let pw: Record<string, Record<string, number>>;
+
+    if (canBuildBracket(allMatches)) {
+      // Bracket-bevidst: simulér de faktiske knockout-kampe gennem træet
+      const playerIds = partial.map((p) => p.playerId);
+      const basePoints = new Map(partial.map((p) => [p.playerId, p.teams.reduce((s, t) => s + t.currentPoints, 0)]));
+      const ownerByTeam = new Map<string, string>();
+      for (const p of partial) for (const t of p.teams) ownerByTeam.set(normName(t.name), p.playerId);
+      // Allerede spillede knockout-kampe (deterministiske)
+      const knownResults = new Map<string, string>();
+      for (const m of allMatches) {
+        if (m.status !== "finished" || m.stage === "group") continue;
+        if (m.home_team === "TBD" || m.away_team === "TBD") continue;
+        const hc = normName(m.home_team), ac = normName(m.away_team);
+        let winnerHome: boolean;
+        if (m.result_type === "penalties" && m.winner_side) winnerHome = m.winner_side === "home";
+        else winnerHome = (m.home_score ?? 0) >= (m.away_score ?? 0);
+        knownResults.set([hc, ac].sort().join("|"), winnerHome ? hc : ac);
+      }
+      ({ winProb: winProbs, pairwise: pw } = simulateBracket(allMatches, {
+        playerIds, basePoints, strength: buildStrengthMap(), ownerByTeam, knownResults, N: 8000,
+      }));
+    } else {
+      // Før gruppespillet er slut: uafhængig model (før-turnerings-fordeling + gulv)
+      const sims: PlayerSim[] = partial.map((p) => ({
+        playerId: p.playerId,
+        teams: p.teams.map((t) =>
+          eliminated.has(normName(t.name))
+            ? { mean: t.currentPoints, stdDev: 0 }
+            : { mean: t.mean, stdDev: t.stdDev, floor: t.currentPoints },
+        ),
+      }));
+      ({ winProb: winProbs, pairwise: pw } = simulateStandings(sims, 8000));
+    }
+
     setSimulating(false);
     setPairwise(pw);
 

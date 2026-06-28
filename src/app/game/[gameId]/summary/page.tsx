@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Trophy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -429,6 +430,14 @@ export default function SummaryPage() {
                 >
                   Median
                 </button>
+              </div>
+              <div className="mt-4">
+                <Link
+                  href={`/game/${gameId}/estimates`}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-4 py-1.5 text-xs font-medium text-emerald-200/90 hover:bg-emerald-500/20 transition-colors"
+                >
+                  📊 Se estimeret slutpoint pr. hold
+                </Link>
               </div>
             </div>
 

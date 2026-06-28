@@ -139,6 +139,47 @@ export function buildFullBracket(matches: TMatch[]): BracketMatch[] {
   return out;
 }
 
+/**
+ * Forventet slutpoint pr. hold (kanonisk navn, lowercase) = nuværende point +
+ * gennemsnitligt simuleret knockout-udbytte gennem bracket'en.
+ */
+export function simulateTeamPoints(
+  matches: TMatch[],
+  opts: { strength: Map<string, number>; currentByTeam: Map<string, number>; knownResults?: Map<string, string>; N?: number },
+): Map<string, number> {
+  const { strength, currentByTeam, knownResults, N = 20000 } = opts;
+  const seeds = resolveSeeds(matches);
+  const resolve = (ref: Ref, winners: Map<number, string>): string | undefined =>
+    "seed" in ref ? seeds.get(ref.seed) : winners.get(ref.win);
+  const str = (t: string) => Math.max(1, strength.get(t) ?? 1);
+
+  const sum = new Map<string, number>();
+  for (let it = 0; it < N; it++) {
+    const winners = new Map<number, string>();
+    for (const node of ALL_NODES) {
+      const home = resolve(node.home, winners);
+      const away = resolve(node.away, winners);
+      if (!home || !away) continue;
+      let winner: string, loser: string;
+      const fixed = knownResults?.get([home, away].sort().join("|"));
+      if (fixed) { winner = fixed; loser = fixed === home ? away : home; }
+      else {
+        const pHome = str(home) / (str(home) + str(away));
+        if (Math.random() < pHome) { winner = home; loser = away; } else { winner = away; loser = home; }
+      }
+      winners.set(node.no, winner);
+      sum.set(winner, (sum.get(winner) ?? 0) + WIN_POINTS + (node.round === "final" ? FINAL_WINNER_BONUS : 0));
+      sum.set(loser, (sum.get(loser) ?? 0) + LOSER_BONUS[node.round]);
+    }
+  }
+
+  const out = new Map<string, number>();
+  for (const t of new Set([...currentByTeam.keys(), ...sum.keys()])) {
+    out.set(t, (currentByTeam.get(t) ?? 0) + (sum.get(t) ?? 0) / N);
+  }
+  return out;
+}
+
 export type BracketSimResult = {
   winProb: Record<string, number>;
   pairwise: Record<string, Record<string, number>>;

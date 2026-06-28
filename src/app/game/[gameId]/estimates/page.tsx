@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 const OWNER_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
 
-type Row = { name: string; flag: string; owner: string | null; color?: string; current: number; est: number; out: boolean };
+type Row = { name: string; flag: string; owner: string | null; color?: string; current: number; est: number; startEst: number; out: boolean };
 
 export default function EstimatesPage() {
   const params = useParams();
@@ -76,7 +76,8 @@ export default function EstimatesPage() {
     const built: Row[] = owned.map(({ canon, raw, owner }) => {
       const wc = findWC2026Team(raw);
       const cur = currentByTeam.get(canon) ?? 0;
-      const estVal = useBracket ? (est.get(canon) ?? cur) : (wc?.mean ?? cur);
+      const startEst = wc?.mean ?? 0;
+      const estVal = useBracket ? (est.get(canon) ?? cur) : startEst;
       return {
         name: wc?.name ?? raw,
         flag: wc?.flag ?? "🏳",
@@ -84,6 +85,7 @@ export default function EstimatesPage() {
         color: owner ? colorByOwner.get(owner) : undefined,
         current: cur,
         est: estVal,
+        startEst,
         out: eliminated.has(canon),
       };
     }).sort((a, b) => b.est - a.est);
@@ -128,39 +130,48 @@ export default function EstimatesPage() {
               )}
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-slate-950/55">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto rounded-2xl border border-white/[0.08] bg-slate-950/55">
+              <table className="w-full min-w-max text-sm">
                 <thead>
                   <tr className="border-b border-white/[0.08] text-[0.6rem] uppercase tracking-wider text-slate-500">
                     <th className="px-3 py-3 text-left w-8">#</th>
                     <th className="px-3 py-3 text-left">Hold</th>
                     <th className="px-3 py-3 text-left">Ejer</th>
+                    <th className="px-3 py-3 text-right">Est. start</th>
                     <th className="px-3 py-3 text-right">Nu</th>
-                    <th className="px-3 py-3 text-right text-emerald-400/80">Est.</th>
+                    <th className="px-3 py-3 text-right text-emerald-400/80">Est. nu</th>
+                    <th className="px-3 py-3 text-right">Udvikling</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.04]">
-                  {rows.map((r, i) => (
-                    <tr key={r.name} className="hover:bg-white/[0.02]">
-                      <td className="px-3 py-2.5 text-xs text-slate-600 tabular-nums">{i + 1}</td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        <span className={cn("mr-1.5", r.out && "opacity-50")}>{r.flag}</span>
-                        <span className={cn("font-medium", r.out ? "text-slate-500 line-through" : "text-slate-200")}>{r.name}</span>
-                        {r.out && <span className="ml-1.5 rounded bg-red-500/15 px-1 text-[0.55rem] font-medium text-red-400/90">ude</span>}
-                      </td>
-                      <td className="px-3 py-2.5 whitespace-nowrap">
-                        {r.owner && (
-                          <span className="rounded px-1.5 py-0.5 text-[0.6rem] font-semibold" style={{ backgroundColor: `${r.color}22`, color: r.color }}>
-                            {r.owner}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-400">{r.current.toLocaleString("da-DK")}</td>
-                      <td className={cn("px-3 py-2.5 text-right font-bold tabular-nums", r.out ? "text-slate-600" : "text-emerald-300")}>
-                        {Math.round(r.est).toLocaleString("da-DK")}
-                      </td>
-                    </tr>
-                  ))}
+                  {rows.map((r, i) => {
+                    const delta = r.est - r.startEst;
+                    return (
+                      <tr key={r.name} className="hover:bg-white/[0.02]">
+                        <td className="px-3 py-2.5 text-xs text-slate-600 tabular-nums">{i + 1}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          <span className={cn("mr-1.5", r.out && "opacity-50")}>{r.flag}</span>
+                          <span className={cn("font-medium", r.out ? "text-slate-500 line-through" : "text-slate-200")}>{r.name}</span>
+                          {r.out && <span className="ml-1.5 rounded bg-red-500/15 px-1 text-[0.55rem] font-medium text-red-400/90">ude</span>}
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap">
+                          {r.owner && (
+                            <span className="rounded px-1.5 py-0.5 text-[0.6rem] font-semibold" style={{ backgroundColor: `${r.color}22`, color: r.color }}>
+                              {r.owner}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">{Math.round(r.startEst).toLocaleString("da-DK")}</td>
+                        <td className="px-3 py-2.5 text-right tabular-nums text-slate-400">{r.current.toLocaleString("da-DK")}</td>
+                        <td className={cn("px-3 py-2.5 text-right font-bold tabular-nums", r.out ? "text-slate-600" : "text-emerald-300")}>
+                          {Math.round(r.est).toLocaleString("da-DK")}
+                        </td>
+                        <td className={cn("px-3 py-2.5 text-right font-semibold tabular-nums", Math.round(delta) > 0 ? "text-emerald-400" : Math.round(delta) < 0 ? "text-red-400" : "text-slate-600")}>
+                          {delta > 0 ? "+" : ""}{Math.round(delta).toLocaleString("da-DK")}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -96,6 +96,49 @@ export function buildR32(matches: TMatch[]): BuiltMatch[] {
   }));
 }
 
+export type BracketMatch = {
+  no: number;
+  round: Round;
+  home: string | null;   // kanonisk navn (lowercase) eller null hvis ukendt endnu
+  away: string | null;
+  homeScore: number | null;
+  awayScore: number | null;
+  winner: string | null;
+};
+
+/** Hele bracket-træet opløst: R32 fra gruppestillinger, senere runder fra spillede resultater. */
+export function buildFullBracket(matches: TMatch[]): BracketMatch[] {
+  const seeds = resolveSeeds(matches);
+  const resultByPair = new Map<string, { winner: string; hs: number; as: number; home: string }>();
+  for (const m of matches) {
+    if (m.status !== "finished" || m.stage === "group") continue;
+    if (m.home_team === "TBD" || m.away_team === "TBD") continue;
+    const hc = canonLower(m.home_team), ac = canonLower(m.away_team);
+    let winnerHome: boolean;
+    if (m.result_type === "penalties" && m.winner_side) winnerHome = m.winner_side === "home";
+    else winnerHome = (m.home_score ?? 0) >= (m.away_score ?? 0);
+    resultByPair.set([hc, ac].sort().join("|"), { winner: winnerHome ? hc : ac, hs: m.home_score ?? 0, as: m.away_score ?? 0, home: hc });
+  }
+
+  const winners = new Map<number, string>();
+  const out: BracketMatch[] = [];
+  for (const node of ALL_NODES) {
+    const home = "seed" in node.home ? (seeds.get(node.home.seed) ?? null) : (winners.get(node.home.win) ?? null);
+    const away = "seed" in node.away ? (seeds.get(node.away.seed) ?? null) : (winners.get(node.away.win) ?? null);
+    let winner: string | null = null, hs: number | null = null, as: number | null = null;
+    if (home && away) {
+      const r = resultByPair.get([home, away].sort().join("|"));
+      if (r) {
+        winner = r.winner;
+        winners.set(node.no, winner);
+        if (r.home === home) { hs = r.hs; as = r.as; } else { hs = r.as; as = r.hs; }
+      }
+    }
+    out.push({ no: node.no, round: node.round, home, away, homeScore: hs, awayScore: as, winner });
+  }
+  return out;
+}
+
 export type BracketSimResult = {
   winProb: Record<string, number>;
   pairwise: Record<string, Record<string, number>>;

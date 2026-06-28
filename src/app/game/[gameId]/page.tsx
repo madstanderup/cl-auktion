@@ -386,6 +386,12 @@ export default function GamePage() {
               Kampe
             </Link>
             <Link
+              href={`/game/${gameId}/bracket`}
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
+            >
+              🏆 Bracket
+            </Link>
+            <Link
               href={`/game/${gameId}/bids`}
               className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
             >

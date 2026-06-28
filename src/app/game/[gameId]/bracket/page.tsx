@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team } from "@/lib/wc2026-teams";
-import { canBuildBracket, buildFullBracket, type BracketMatch, type Round } from "@/lib/bracket";
+import { canBuildBracket, buildFullBracket, type BracketMatch } from "@/lib/bracket";
 import { cn } from "@/lib/utils";
 
 type MatchRow = {
@@ -13,14 +13,6 @@ type MatchRow = {
   home_score: number | null; away_score: number | null;
   result_type: string | null; winner_side: string | null; status: string;
 };
-
-const ROUNDS: { key: Round; label: string }[] = [
-  { key: "round_of_32", label: "1/16-finale" },
-  { key: "round_of_16", label: "1/8-finale" },
-  { key: "quarter_final", label: "Kvartfinale" },
-  { key: "semi_final", label: "Semifinale" },
-  { key: "final", label: "Finale" },
-];
 
 const OWNER_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
 
@@ -131,31 +123,51 @@ export default function BracketPage() {
         <p className="px-4 py-24 text-center text-sm text-slate-500">
           Bracket bliver tilgængelig når gruppespillet er færdigspillet.
         </p>
-      ) : (
-        <main className="overflow-x-auto px-4 py-6 sm:px-6">
-          <div className="mx-auto flex min-w-max gap-4">
-            {ROUNDS.map((r) => {
-              const ms = bracket.filter((m) => m.round === r.key);
-              return (
-                <div key={r.key} className="flex w-56 shrink-0 flex-col">
-                  <p className="mb-3 text-center text-[0.65rem] font-semibold uppercase tracking-wider text-slate-500">{r.label}</p>
-                  <div className="flex flex-1 flex-col justify-around gap-2">
-                    {ms.map((m) => {
-                      const settled = m.winner !== null;
-                      return (
-                        <div key={m.no} className="overflow-hidden rounded-lg border border-white/10 bg-slate-950/60 divide-y divide-white/[0.06]">
-                          <TeamRow canon={m.home} score={m.homeScore} isWinner={settled && m.winner === m.home} settled={settled} />
-                          <TeamRow canon={m.away} score={m.awayScore} isWinner={settled && m.winner === m.away} settled={settled} />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+      ) : (() => {
+        const byNo = new Map(bracket.map((m) => [m.no, m]));
+        const MatchCard = (no: number) => {
+          const m = byNo.get(no);
+          if (!m) return null;
+          const settled = m.winner !== null;
+          return (
+            <div key={no} className="overflow-hidden rounded-lg border border-white/10 bg-slate-950/60 divide-y divide-white/[0.06]">
+              <TeamRow canon={m.home} score={m.homeScore} isWinner={settled && m.winner === m.home} settled={settled} />
+              <TeamRow canon={m.away} score={m.awayScore} isWinner={settled && m.winner === m.away} settled={settled} />
+            </div>
+          );
+        };
+        const Col = (label: string, nos: number[], key: string) => (
+          <div key={key} className="flex w-40 shrink-0 flex-col sm:w-44">
+            <p className="mb-3 text-center text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+            <div className="flex flex-1 flex-col justify-around gap-2">{nos.map(MatchCard)}</div>
           </div>
-        </main>
-      )}
+        );
+        const LEFT: [string, number[]][] = [
+          ["1/16", [74, 77, 73, 75, 83, 84, 81, 82]],
+          ["1/8", [89, 90, 93, 94]],
+          ["Kvartfinale", [97, 98]],
+          ["Semifinale", [101]],
+        ];
+        const RIGHT: [string, number[]][] = [
+          ["Semifinale", [102]],
+          ["Kvartfinale", [99, 100]],
+          ["1/8", [91, 92, 95, 96]],
+          ["1/16", [76, 78, 79, 80, 86, 88, 85, 87]],
+        ];
+        return (
+          <main className="overflow-x-auto px-4 py-6 sm:px-6">
+            <div className="mx-auto flex min-w-max items-stretch gap-3">
+              {LEFT.map(([l, nos]) => Col(l, nos, `l-${l}`))}
+              {/* Finale i midten */}
+              <div className="flex w-44 shrink-0 flex-col justify-center">
+                <p className="mb-3 text-center text-[0.7rem] font-bold uppercase tracking-[0.2em] text-amber-300">🏆 Finale</p>
+                {MatchCard(104)}
+              </div>
+              {RIGHT.map(([l, nos]) => Col(l, nos, `r-${l}`))}
+            </div>
+          </main>
+        );
+      })()}
     </div>
   );
 }

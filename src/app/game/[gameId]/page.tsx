@@ -2,14 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, CalendarDays, Check, Gavel, Loader2, Share2, ShieldCheck, Table2, TrendingUp, Trophy, Users } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { ArrowLeft, Check, Loader2, Share2, Trophy, Users } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import {
-  GAME_ADMIN_SESSION_KEY,
   PLAYER_GAME_ID_KEY,
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
@@ -133,21 +130,10 @@ export default function GamePage() {
   const [allPlayerTeams, setAllPlayerTeams] = useState<PlayerTeams[]>([]);
   const [myPlayer, setMyPlayer] = useState<Player | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     if (!gameId) return;
-
     try { localStorage.setItem(PLAYER_GAME_ID_KEY, gameId); } catch { /* ignore */ }
-
-    try {
-      const raw = localStorage.getItem(GAME_ADMIN_SESSION_KEY);
-      if (raw) {
-        const o = JSON.parse(raw) as { gameId?: string };
-        setIsAdmin(o.gameId === gameId);
-      }
-    } catch { /* ignore */ }
-
     void load();
   }, [gameId]);
 
@@ -353,64 +339,6 @@ export default function GamePage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {isAuctionActive && (
-              <Link
-                href="/auction"
-                className={cn(buttonVariants({ size: "sm" }), "bg-amber-400 text-slate-950 hover:bg-amber-300 font-semibold text-xs")}
-              >
-                <Gavel className="size-3.5 mr-1" />
-                Auktion
-              </Link>
-            )}
-            <Link
-              href={`/game/${gameId}/points`}
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
-            >
-              <Trophy className="size-3.5 mr-1" />
-              Pointoversigt
-            </Link>
-            {isAdmin && (
-              <Link
-                href="/auction/admin"
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
-              >
-                <ShieldCheck className="size-3.5 mr-1" />
-                Admin
-              </Link>
-            )}
-            <Link
-              href={`/game/${gameId}/matches`}
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
-            >
-              <CalendarDays className="size-3.5 mr-1" />
-              Kampe
-            </Link>
-            <Link
-              href={`/game/${gameId}/bracket`}
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
-            >
-              🏆 Bracket
-            </Link>
-            <Link
-              href={`/game/${gameId}/bids`}
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
-            >
-              <Table2 className="size-3.5 mr-1" />
-              Budoversigt
-            </Link>
-            <Link
-              href={`/game/${gameId}/summary`}
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
-            >
-              <TrendingUp className="size-3.5 mr-1" />
-              Summary
-            </Link>
-            <Link
-              href="/regler"
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "border-white/20 text-xs text-slate-200")}
-            >
-              📖 Regler
-            </Link>
             <button
               type="button"
               onClick={() => void shareStandings()}
@@ -418,7 +346,7 @@ export default function GamePage() {
               className={cn(buttonVariants({ size: "sm" }), "bg-amber-400 text-slate-950 hover:bg-amber-300 font-semibold text-xs disabled:opacity-50 disabled:pointer-events-none")}
             >
               {shareDone ? <Check className="size-3.5 mr-1" /> : <Share2 className="size-3.5 mr-1" />}
-              {shareDone ? "Kopieret" : "Del"}
+              {shareDone ? "Kopieret" : "Del stilling"}
             </button>
           </div>
         </div>

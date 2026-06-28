@@ -10,6 +10,7 @@ import {
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
 import { supabase } from "@/lib/supabase";
+import { findWC2026Team } from "@/lib/wc2026-teams";
 import { cn } from "@/lib/utils";
 
 const STAGES = [
@@ -44,18 +45,19 @@ type MatchRow = {
 };
 
 function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
+  const normalName = findWC2026Team(teamName)?.name ?? teamName;
   let total = 0;
   for (const stage of STAGES) {
     const ms = matches.filter(
       (m) =>
         m.stage === stage.key &&
         m.status === "finished" &&
-        (m.home_team === teamName || m.away_team === teamName),
+        (m.home_team === normalName || m.away_team === normalName),
     );
     for (const m of ms) {
       const hs = m.home_score ?? 0;
       const as_ = m.away_score ?? 0;
-      const isHome = m.home_team === teamName;
+      const isHome = m.home_team === normalName;
       const myScore = isHome ? hs : as_;
       const opScore = isHome ? as_ : hs;
       const isET = m.result_type === "extra_time" || m.result_type === "penalties";
@@ -106,21 +108,19 @@ export default function ScorePage() {
     setLoading(true);
     setError(null);
 
-    const [{ data: gameRow }, { data: self, error: selfErr }, { data: roster }, { data: all }, { data: matchData }] =
+    const [{ data: gameRow }, { data: self, error: selfErr }, { data: gtAll }, { data: all }, { data: matchData }] =
       await Promise.all([
         supabase.from("games").select("label,invite_code").eq("id", gid).maybeSingle(),
-        supabase.from("players").select("id,name,coins,points,game_id").eq("id", pid).maybeSingle(),
+        supabase.from("players").select("id,name,coins,game_id").eq("id", pid).maybeSingle(),
         supabase
           .from("game_teams")
-          .select("team_id, teams(name)")
+          .select("team_id, owner_player_id, teams(name)")
           .eq("game_id", gid)
-          .eq("owner_player_id", pid),
+          .not("owner_player_id", "is", null),
         supabase
           .from("players")
-          .select("id,name,points,coins")
-          .eq("game_id", gid)
-          .order("points", { ascending: false })
-          .order("name", { ascending: true }),
+          .select("id,name,coins")
+          .eq("game_id", gid),
         supabase
           .from("wc_matches")
           .select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status")
@@ -154,13 +154,6 @@ export default function ScorePage() {
           : null,
     );
 
-    setMe({
-      id: String(self.id),
-      name: String(self.name),
-      coins: Number(self.coins),
-      points: Number(self.points),
-    });
-
     const matches: MatchRow[] = (matchData ?? []).map((m: Record<string, unknown>) => ({
       home_team: String(m.home_team),
       away_team: String(m.away_team),
@@ -172,23 +165,37 @@ export default function ScorePage() {
       status: String(m.status),
     }));
 
-    const teams: TeamRow[] = [];
-    for (const row of roster ?? []) {
-      const r = row as { teams?: { name?: string } | null };
+    // Beregn point client-side (med navne-normalisering) for alle spillere
+    const pointsByPlayer = new Map<string, number>();
+    const myTeamRows: TeamRow[] = [];
+    for (const row of gtAll ?? []) {
+      const r = row as { owner_player_id?: string | null; teams?: { name?: string } | null };
       const nm = r.teams?.name;
-      if (nm) {
-        teams.push({ name: String(nm), points: calcTeamPoints(String(nm), matches) });
-      }
+      const oid = r.owner_player_id ? String(r.owner_player_id) : null;
+      if (!nm || !oid) continue;
+      const pts = calcTeamPoints(String(nm), matches);
+      pointsByPlayer.set(oid, (pointsByPlayer.get(oid) ?? 0) + pts);
+      if (oid === pid) myTeamRows.push({ name: String(nm), points: pts });
     }
-    setMyTeams(teams.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, "da")));
+
+    setMe({
+      id: String(self.id),
+      name: String(self.name),
+      coins: Number(self.coins),
+      points: pointsByPlayer.get(pid) ?? 0,
+    });
+
+    setMyTeams(myTeamRows.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, "da")));
 
     setBoard(
-      (all ?? []).map((r) => ({
-        id: String(r.id),
-        name: String(r.name),
-        points: Number(r.points),
-        coins: Number(r.coins),
-      })),
+      (all ?? [])
+        .map((r) => ({
+          id: String(r.id),
+          name: String(r.name),
+          points: pointsByPlayer.get(String(r.id)) ?? 0,
+          coins: Number(r.coins),
+        }))
+        .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, "da")),
     );
   }, []);
 

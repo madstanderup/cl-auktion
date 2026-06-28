@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Trophy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team, simulateStandings, type PlayerSim } from "@/lib/wc2026-teams";
+import { computeEliminatedTeams } from "@/lib/tournament";
 import { formatStake } from "@/lib/side-bets";
 import { cn } from "@/lib/utils";
 
@@ -67,66 +68,6 @@ function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
   return total;
 }
 
-const _KNOCKOUT_STAGES = new Set(["round_of_32", "round_of_16", "quarter_final", "semi_final", "final"]);
-
-function matchWinner(m: MatchRow): "home" | "away" | "draw" {
-  if (m.result_type === "penalties" && m.winner_side) return m.winner_side as "home" | "away";
-  const h = m.home_score ?? 0, a = m.away_score ?? 0;
-  if (h > a) return "home";
-  if (a > h) return "away";
-  return "draw";
-}
-
-/**
- * Returnerer sæt af kanoniske holdnavne (lowercase) der ikke kan score flere point:
- *  (a) tabt en afgjort knockout-kamp
- *  (b) gruppespil er færdigt (round_of_32 fuldt trukket) og holdet gik ikke videre
- *  (c) finalen er spillet → alle hold er færdige
- */
-function computeDoneTeams(matches: MatchRow[]): Set<string> {
-  const norm = (n: string) => (findWC2026Team(n)?.name ?? n).toLowerCase();
-  const done = new Set<string>();
-
-  // (a) Knockout-tabere
-  for (const m of matches) {
-    if (m.status !== "finished" || !_KNOCKOUT_STAGES.has(m.stage)) continue;
-    const w = matchWinner(m);
-    if (w === "home") done.add(norm(m.away_team));
-    else if (w === "away") done.add(norm(m.home_team));
-  }
-
-  // (b) Gruppe-udryddede: når round_of_32 er fuldt trukket, er hold der ikke
-  //     optræder i nogen knockout-kamp slået ud i gruppespillet
-  const r32 = matches.filter((m) => m.stage === "round_of_32");
-  const r32Drawn =
-    r32.length >= 32 &&
-    r32.every((m) => m.home_team && m.away_team && m.home_team !== "TBD" && m.away_team !== "TBD");
-  if (r32Drawn) {
-    const advanced = new Set<string>();
-    for (const m of matches) {
-      if (!_KNOCKOUT_STAGES.has(m.stage)) continue;
-      if (m.home_team && m.home_team !== "TBD") advanced.add(norm(m.home_team));
-      if (m.away_team && m.away_team !== "TBD") advanced.add(norm(m.away_team));
-    }
-    for (const m of matches) {
-      if (m.stage !== "group") continue;
-      for (const t of [m.home_team, m.away_team]) {
-        if (t && t !== "TBD" && !advanced.has(norm(t))) done.add(norm(t));
-      }
-    }
-  }
-
-  // (c) Finalen spillet → turneringen er slut
-  if (matches.some((m) => m.stage === "final" && m.status === "finished")) {
-    for (const m of matches) {
-      if (m.home_team && m.home_team !== "TBD") done.add(norm(m.home_team));
-      if (m.away_team && m.away_team !== "TBD") done.add(norm(m.away_team));
-    }
-  }
-
-  return done;
-}
-
 function roiLabel(pts: number, bid: number) {
   if (bid <= 0) return pts > 0 ? "∞" : null;
   return (pts / bid).toFixed(1) + "x";
@@ -159,6 +100,8 @@ type PlayerResult = {
 
 type SortKey = "mean" | "median";
 
+type SnapshotRow = { snapshot_date: string; player_id: string; win_prob: number };
+
 type SideBetRow = {
   id: string;
   bookie_player_id: string;
@@ -185,6 +128,7 @@ export default function SummaryPage() {
 
   const [results, setResults] = useState<PlayerResult[]>([]);
   const [pairwise, setPairwise] = useState<Record<string, Record<string, number>>>({});
+  const [history, setHistory] = useState<SnapshotRow[]>([]);
   const [sideBets, setSideBets] = useState<SideBetRow[]>([]);
   const [playerNameById, setPlayerNameById] = useState<Map<string, string>>(new Map());
   const [gameLabel, setGameLabel] = useState("");
@@ -305,12 +249,12 @@ export default function SummaryPage() {
     // hold der stadig er med beholder før-turnerings-fordelingen, men med
     // allerede scorede point som gulv.
     setSimulating(true);
-    const doneTeams = computeDoneTeams(allMatches);
+    const eliminated = computeEliminatedTeams(allMatches);
     const normName = (n: string) => (findWC2026Team(n)?.name ?? n).toLowerCase();
     const sims: PlayerSim[] = partial.map((p) => ({
       playerId: p.playerId,
       teams: p.teams.map((t) => {
-        if (doneTeams.has(normName(t.name))) {
+        if (eliminated.has(normName(t.name))) {
           return { mean: t.currentPoints, stdDev: 0 };
         }
         return { mean: t.mean, stdDev: t.stdDev, floor: t.currentPoints };
@@ -329,6 +273,30 @@ export default function SummaryPage() {
 
     setResults(full);
     setLoading(false);
+
+    // Gem dagligt snapshot af vindersandsynlighed (ét pr. spil pr. dag) + hent historik
+    const today = new Date().toLocaleDateString("sv-SE");
+    const snapshotRows = full.map((p) => ({
+      game_id: gameId,
+      snapshot_date: today,
+      player_id: p.playerId,
+      win_prob: Math.round((winProbs[p.playerId] ?? 0) * 10000) / 10000,
+      points: p.teams.reduce((s, t) => s + t.currentPoints, 0),
+      teams_alive: p.teams.filter((t) => !eliminated.has(normName(t.name))).length,
+    }));
+    try {
+      await supabase.from("win_prob_snapshots").upsert(snapshotRows, { onConflict: "game_id,snapshot_date,player_id" });
+    } catch { /* ignore */ }
+    void loadHistory();
+  }
+
+  async function loadHistory() {
+    const { data } = await supabase
+      .from("win_prob_snapshots")
+      .select("snapshot_date, player_id, win_prob")
+      .eq("game_id", gameId)
+      .order("snapshot_date", { ascending: true });
+    setHistory((data ?? []) as SnapshotRow[]);
   }
 
   const roiColor = makeRoiColorFn(results.flatMap((p) => p.teams));
@@ -761,6 +729,66 @@ export default function SummaryPage() {
                   Tager højde for allerede spillede kampe — slåede hold er låst til deres faktiske point · WM 2026 · Ikke officiel forudsigelse
                 </p>
               </div>
+
+              {/* Vindchance over tid */}
+              {(() => {
+                const dates = [...new Set(history.map((h) => h.snapshot_date))].sort();
+                if (dates.length < 2) return null;
+                const CHART_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
+                const order = [...results].sort((a, b) => b.winProb - a.winProb);
+                const W = 720, H = 250, padL = 38, padR = 12, padT = 12, padB = 28;
+                const plotW = W - padL - padR, plotH = H - padT - padB;
+                const x = (i: number) => padL + (dates.length === 1 ? plotW / 2 : (i / (dates.length - 1)) * plotW);
+                const y = (p: number) => padT + (1 - p) * plotH;
+                const byPlayerDate = new Map<string, number>();
+                for (const h of history) byPlayerDate.set(`${h.player_id}|${h.snapshot_date}`, Number(h.win_prob));
+                const fmt = (d: string) => { const dt = new Date(d); return `${dt.getDate()}/${dt.getMonth() + 1}`; };
+                const labelIdx = dates.length <= 4 ? dates.map((_, i) => i) : [0, Math.floor((dates.length - 1) / 2), dates.length - 1];
+
+                return (
+                  <div className="rounded-xl border border-white/10 bg-slate-950/70 p-5 sm:col-span-2">
+                    <p className="mb-4 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-blue-300/80">
+                      📈 Vindchance over tid
+                    </p>
+                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 260 }}>
+                      {[0, 0.25, 0.5, 0.75, 1].map((g) => (
+                        <g key={g}>
+                          <line x1={padL} y1={y(g)} x2={W - padR} y2={y(g)} stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
+                          <text x={padL - 6} y={y(g) + 3} textAnchor="end" fontSize={10} fill="#64748b">{Math.round(g * 100)}%</text>
+                        </g>
+                      ))}
+                      {labelIdx.map((i) => (
+                        <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize={10} fill="#64748b">{fmt(dates[i])}</text>
+                      ))}
+                      {order.map((p, idx) => {
+                        const color = CHART_COLORS[idx % CHART_COLORS.length];
+                        const pts = dates
+                          .map((d, i) => ({ i, v: byPlayerDate.get(`${p.playerId}|${d}`) }))
+                          .filter((q) => q.v !== undefined) as { i: number; v: number }[];
+                        if (pts.length === 0) return null;
+                        const path = pts.map((q, k) => `${k === 0 ? "M" : "L"} ${x(q.i).toFixed(1)} ${y(q.v).toFixed(1)}`).join(" ");
+                        return (
+                          <g key={p.playerId}>
+                            <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                            {pts.map((q) => <circle key={q.i} cx={x(q.i)} cy={y(q.v)} r={2.5} fill={color} />)}
+                          </g>
+                        );
+                      })}
+                    </svg>
+                    <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
+                      {order.map((p, idx) => (
+                        <span key={p.playerId} className="flex items-center gap-1.5 text-xs text-slate-300">
+                          <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
+                          {p.playerName}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-center text-[0.65rem] text-slate-600">
+                      Ét punkt pr. dag stillingen er blevet åbnet · {dates.length} målinger
+                    </p>
+                  </div>
+                );
+              })()}
 
               {/* Indbyrdes matrix */}
               {results.length >= 2 && Object.keys(pairwise).length > 0 && (() => {

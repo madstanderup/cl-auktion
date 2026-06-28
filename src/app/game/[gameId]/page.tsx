@@ -14,6 +14,7 @@ import {
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
 import { findWC2026Team } from "@/lib/wc2026-teams";
+import { computeEliminatedTeams, countAlive } from "@/lib/tournament";
 import { SideBetOffer } from "@/components/side-bet-offer";
 
 const STAGES = [
@@ -251,6 +252,13 @@ export default function GamePage() {
   );
   const sortedPlayers = [...players].sort(
     (a, b) => (computedPoints.get(b.id) ?? 0) - (computedPoints.get(a.id) ?? 0)
+  );
+
+  // Hold tilbage pr. spiller (slåede hold trækkes fra)
+  const eliminated = computeEliminatedTeams(matchRows);
+  const tournamentStarted = matchRows.some((m) => m.status === "finished");
+  const aliveByPlayer = new Map<string, number>(
+    allPlayerTeams.map((pt) => [pt.player.id, countAlive(pt.teams.map((t) => t.name), eliminated)])
   );
 
   const MEDALS = ["🥇", "🥈", "🥉"];
@@ -492,8 +500,12 @@ export default function GamePage() {
                       <span className="truncate font-medium text-white">{p.name}</span>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
+                      {tournamentStarted && (
+                        <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[0.65rem] font-medium text-emerald-300/90">
+                          {aliveByPlayer.get(p.id) ?? 0} tilbage
+                        </span>
+                      )}
                       <span className="tabular-nums font-semibold text-amber-200">{(computedPoints.get(p.id) ?? 0).toLocaleString("da-DK")} pt</span>
-                      <span className="text-xs text-slate-500">{p.coins} 🪙</span>
                     </div>
                   </li>
                 ))}

@@ -16,6 +16,7 @@ import {
 } from "@/lib/player-storage";
 import { cn } from "@/lib/utils";
 import { findWC2026Team } from "@/lib/wc2026-teams";
+import { computeEliminatedTeams, countAlive } from "@/lib/tournament";
 
 const POINT_STAGES = ["group", "round_of_32", "round_of_16", "quarter_final", "semi_final", "final"];
 const POINT_STAGE_BONUS: Record<string, number> = {
@@ -83,6 +84,9 @@ type MyGame = {
   invite_code: string;
   label: string | null;
   auction_status: string | null;
+  teams_total: number;
+  teams_alive: number;
+  tournament_started: boolean;
 };
 
 type OwnedGame = {
@@ -211,19 +215,27 @@ export default function Home() {
 
       const teamNameById = new Map(((teamsRes.data ?? []) as Record<string, unknown>[]).map((t) => [String(t.id), String(t.name)]));
 
-      // Beregn point pr. spiller: sum over ejede holds point
+      // Beregn point pr. spiller + saml ejede hold (til "hold tilbage")
       const pointsByPlayer = new Map<string, number>();
+      const teamsByPlayer = new Map<string, string[]>();
       for (const gt of (gtRes.data ?? []) as Record<string, unknown>[]) {
         const pid = String(gt.owner_player_id);
         const tname = teamNameById.get(String(gt.team_id));
         if (!tname) continue;
         const matches = matchesByGame.get(String(gt.game_id)) ?? [];
         pointsByPlayer.set(pid, (pointsByPlayer.get(pid) ?? 0) + calcTeamPoints(tname, matches));
+        (teamsByPlayer.get(pid) ?? teamsByPlayer.set(pid, []).get(pid)!).push(tname);
       }
+
+      // Udryddede hold pr. spil
+      const eliminatedByGame = new Map<string, Set<string>>();
+      for (const gid of gameIds) eliminatedByGame.set(gid, computeEliminatedTeams(matchesByGame.get(gid) ?? []));
 
       const games: MyGame[] = playerRows.map((p) => {
         const gid = String(p.game_id);
         const gInfo = gameMap.get(gid);
+        const myTeams = teamsByPlayer.get(String(p.id)) ?? [];
+        const elim = eliminatedByGame.get(gid) ?? new Set<string>();
         return {
           player_id: String(p.id),
           player_name: p.name as string,
@@ -233,6 +245,9 @@ export default function Home() {
           invite_code: gInfo?.invite_code ?? "",
           label: gInfo?.label ?? null,
           auction_status: auctionMap.get(gid) ?? null,
+          teams_total: myTeams.length,
+          teams_alive: countAlive(myTeams, elim),
+          tournament_started: (matchesByGame.get(gid) ?? []).some((m) => m.status === "finished"),
         };
       });
 
@@ -626,7 +641,7 @@ export default function Home() {
                               {" · "}
                               <span className="text-slate-400">{g.points} point</span>
                             </p>
-                            <p className="mt-1">
+                            <p className="mt-1 flex flex-wrap items-center gap-1.5">
                               {isActive ? (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-medium text-emerald-300">
                                   <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -635,6 +650,11 @@ export default function Home() {
                               ) : (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-700/50 px-2 py-0.5 text-[0.65rem] font-medium text-slate-400">
                                   Turnering
+                                </span>
+                              )}
+                              {!isActive && g.tournament_started && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[0.65rem] font-medium text-emerald-300/90">
+                                  {g.teams_alive}/{g.teams_total} hold tilbage
                                 </span>
                               )}
                             </p>

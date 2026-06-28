@@ -102,7 +102,7 @@ type PlayerResult = {
 
 type SortKey = "mean" | "median";
 
-type SnapshotRow = { snapshot_date: string; player_id: string; win_prob: number };
+type SnapshotRow = { snapshot_date: string; player_id: string; win_prob: number; expected_points: number };
 
 type SideBetRow = {
   id: string;
@@ -131,6 +131,7 @@ export default function SummaryPage() {
   const [results, setResults] = useState<PlayerResult[]>([]);
   const [pairwise, setPairwise] = useState<Record<string, Record<string, number>>>({});
   const [history, setHistory] = useState<SnapshotRow[]>([]);
+  const [eliminated, setEliminated] = useState<Set<string>>(new Set());
   const [sideBets, setSideBets] = useState<SideBetRow[]>([]);
   const [playerNameById, setPlayerNameById] = useState<Map<string, string>>(new Map());
   const [gameLabel, setGameLabel] = useState("");
@@ -305,6 +306,8 @@ export default function SummaryPage() {
     setResults(full);
     setLoading(false);
 
+    setEliminated(eliminated);
+
     // Gem dagligt snapshot af vindersandsynlighed (ét pr. spil pr. dag) + hent historik
     const today = new Date().toLocaleDateString("sv-SE");
     const snapshotRows = full.map((p) => ({
@@ -313,6 +316,7 @@ export default function SummaryPage() {
       player_id: p.playerId,
       win_prob: Math.round((winProbs[p.playerId] ?? 0) * 10000) / 10000,
       points: p.teams.reduce((s, t) => s + t.currentPoints, 0),
+      expected_points: Math.round(p.expectedLive),
       teams_alive: p.teams.filter((t) => !eliminated.has(normName(t.name))).length,
     }));
     try {
@@ -324,7 +328,7 @@ export default function SummaryPage() {
   async function loadHistory() {
     const { data } = await supabase
       .from("win_prob_snapshots")
-      .select("snapshot_date, player_id, win_prob")
+      .select("snapshot_date, player_id, win_prob, expected_points")
       .eq("game_id", gameId)
       .order("snapshot_date", { ascending: true });
     setHistory((data ?? []) as SnapshotRow[]);
@@ -456,9 +460,14 @@ export default function SummaryPage() {
                             {p.playerName}
                           </span>
                         </div>
-                        <span className="rounded-full bg-black/30 px-2 py-0.5 text-xs font-semibold text-white/80">
-                          {p.teams.length} hold
-                        </span>
+                        {(() => {
+                          const alive = p.teams.filter((t) => !eliminated.has((findWC2026Team(t.name)?.name ?? t.name).toLowerCase())).length;
+                          return (
+                            <span className="rounded-full bg-black/30 px-2 py-0.5 text-xs font-semibold text-white/80">
+                              {eliminated.size > 0 ? `${alive}/${p.teams.length} tilbage` : `${p.teams.length} hold`}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -468,13 +477,15 @@ export default function SummaryPage() {
                         {p.teams.map((t) => {
                           const roi  = roiLabel(t.currentPoints, t.pricePaid);
                           const xRoi = t.pricePaid > 0 ? (t.mean / t.pricePaid).toFixed(1) + "x" : null;
+                          const out = eliminated.has((findWC2026Team(t.name)?.name ?? t.name).toLowerCase());
                           return (
                             <li key={t.name} className="py-0.5">
                               {/* Linje 1: hold + faktiske tal */}
                               <div className="flex items-center justify-between gap-2 text-xs">
-                                <span className="flex items-center gap-1.5 truncate text-slate-200">
-                                  <span>{t.flag}</span>
-                                  <span className="truncate">{t.name}</span>
+                                <span className={cn("flex items-center gap-1.5 truncate", out ? "text-slate-600" : "text-slate-200")}>
+                                  <span className={cn(out && "opacity-50")}>{t.flag}</span>
+                                  <span className={cn("truncate", out && "line-through")}>{t.name}</span>
+                                  {out && <span className="shrink-0 rounded bg-red-500/15 px-1 text-[0.55rem] font-medium text-red-400/90">ude</span>}
                                 </span>
                                 <span className="flex items-center gap-2 shrink-0">
                                   {t.currentPoints > 0 && (
@@ -826,6 +837,68 @@ export default function SummaryPage() {
                     </div>
                     <p className="mt-3 text-center text-[0.65rem] text-slate-600">
                       Ét punkt pr. dag stillingen er blevet åbnet · {dates.length} målinger
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {/* Forventet slutpoint over tid */}
+              {(() => {
+                const dates = [...new Set(history.map((h) => h.snapshot_date))].sort();
+                if (dates.length < 2) return null;
+                const CHART_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
+                const order = [...results].sort((a, b) => b.winProb - a.winProb);
+                const byPlayerDate = new Map<string, number>();
+                for (const h of history) byPlayerDate.set(`${h.player_id}|${h.snapshot_date}`, Number(h.expected_points));
+                const yMax = Math.max(1, ...history.map((h) => Number(h.expected_points)));
+                const W = 720, H = 250, padL = 44, padR = 12, padT = 12, padB = 28;
+                const plotW = W - padL - padR, plotH = H - padT - padB;
+                const x = (i: number) => padL + (dates.length === 1 ? plotW / 2 : (i / (dates.length - 1)) * plotW);
+                const y = (v: number) => padT + (1 - v / yMax) * plotH;
+                const fmt = (d: string) => { const dt = new Date(d); return `${dt.getDate()}/${dt.getMonth() + 1}`; };
+                const labelIdx = dates.length <= 4 ? dates.map((_, i) => i) : [0, Math.floor((dates.length - 1) / 2), dates.length - 1];
+                const gridVals = [0, 0.25, 0.5, 0.75, 1].map((g) => Math.round(g * yMax));
+
+                return (
+                  <div className="rounded-xl border border-white/10 bg-slate-950/70 p-5 sm:col-span-2">
+                    <p className="mb-4 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-emerald-300/80">
+                      📈 Forventet slutpoint over tid
+                    </p>
+                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 260 }}>
+                      {gridVals.map((gv, gi) => (
+                        <g key={gi}>
+                          <line x1={padL} y1={y(gv)} x2={W - padR} y2={y(gv)} stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
+                          <text x={padL - 6} y={y(gv) + 3} textAnchor="end" fontSize={10} fill="#64748b">{gv.toLocaleString("da-DK")}</text>
+                        </g>
+                      ))}
+                      {labelIdx.map((i) => (
+                        <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize={10} fill="#64748b">{fmt(dates[i])}</text>
+                      ))}
+                      {order.map((p, idx) => {
+                        const color = CHART_COLORS[idx % CHART_COLORS.length];
+                        const pts = dates
+                          .map((d, i) => ({ i, v: byPlayerDate.get(`${p.playerId}|${d}`) }))
+                          .filter((q) => q.v !== undefined) as { i: number; v: number }[];
+                        if (pts.length === 0) return null;
+                        const path = pts.map((q, k) => `${k === 0 ? "M" : "L"} ${x(q.i).toFixed(1)} ${y(q.v).toFixed(1)}`).join(" ");
+                        return (
+                          <g key={p.playerId}>
+                            <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                            {pts.map((q) => <circle key={q.i} cx={x(q.i)} cy={y(q.v)} r={2.5} fill={color} />)}
+                          </g>
+                        );
+                      })}
+                    </svg>
+                    <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
+                      {order.map((p, idx) => (
+                        <span key={p.playerId} className="flex items-center gap-1.5 text-xs text-slate-300">
+                          <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
+                          {p.playerName}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-center text-[0.65rem] text-slate-600">
+                      Forventet slutpoint (nuværende + simuleret resterende) pr. måling
                     </p>
                   </div>
                 );

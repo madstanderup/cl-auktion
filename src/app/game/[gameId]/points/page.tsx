@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, Check, Loader2, RefreshCw, Share2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team } from "@/lib/wc2026-teams";
 import { cn } from "@/lib/utils";
@@ -71,6 +71,7 @@ export default function PointsPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [gameLabel, setGameLabel] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [shareDone, setShareDone] = useState(false);
 
   useEffect(() => { if (gameId) void load(); }, [gameId]);
 
@@ -180,6 +181,41 @@ export default function PointsPage() {
     return <span className="font-semibold text-amber-200/90">{v}</span>;
   }
 
+  // Kumulative point pr. spiller runde for runde
+  const playerAgg = new Map<string, number[]>();
+  for (const r of rows) {
+    if (!r.owner) continue;
+    const arr = playerAgg.get(r.owner) ?? new Array(COLS.length).fill(0);
+    for (let i = 0; i < COLS.length; i++) arr[i] += (i < 3 ? r.group[i] : r.knockout[i - 3]) ?? 0;
+    playerAgg.set(r.owner, arr);
+  }
+  const series = [...playerAgg.entries()]
+    .map(([name, per]) => {
+      const cum: number[] = [];
+      let s = 0;
+      for (const v of per) { s += v; cum.push(s); }
+      return { name, cum, total: s };
+    })
+    .sort((a, b) => b.total - a.total);
+  // Sidste runde med point hos nogen (afkort den flade hale)
+  let lastRound = 0;
+  for (let i = 0; i < COLS.length; i++) if (series.some((s) => (s.cum[i] ?? 0) > (i > 0 ? s.cum[i - 1] ?? 0 : 0))) lastRound = i;
+
+  const MEDALS = ["🥇", "🥈", "🥉"];
+  async function shareStandings() {
+    const url = typeof window !== "undefined" ? `${window.location.origin}/s/${gameId}` : "";
+    const lines = series.map((s, i) => `${MEDALS[i] ?? `${i + 1}.`} ${s.name} — ${s.total.toLocaleString("da-DK")} pt`);
+    const text = `🏆 ${gameLabel} — Stilling\n\n${lines.join("\n")}`;
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) { await navigator.share({ title: `${gameLabel} — Stilling`, text, url }); return; }
+    } catch { /* annulleret */ }
+    try {
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      setShareDone(true);
+      setTimeout(() => setShareDone(false), 2000);
+    } catch { /* ignore */ }
+  }
+
   return (
     <div className="min-h-screen bg-[#030711] text-slate-100">
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
@@ -207,6 +243,15 @@ export default function PointsPage() {
             <RefreshCw className="size-3.5" />
             Opdater
           </button>
+          <button
+            type="button"
+            onClick={() => void shareStandings()}
+            disabled={loading || series.length === 0}
+            className="flex items-center gap-1.5 rounded-lg bg-amber-400 px-3 py-1.5 text-xs font-semibold text-slate-950 hover:bg-amber-300 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+          >
+            {shareDone ? <Check className="size-3.5" /> : <Share2 className="size-3.5" />}
+            {shareDone ? "Kopieret" : "Del"}
+          </button>
         </div>
 
         {loading ? (
@@ -216,6 +261,7 @@ export default function PointsPage() {
         ) : rows.length === 0 ? (
           <p className="text-center text-sm text-slate-500 py-16">Ingen hold i dette spil.</p>
         ) : (
+          <div className="space-y-6">
           <div className="overflow-x-auto rounded-2xl border border-white/[0.08] bg-slate-950/55 shadow-xl backdrop-blur-md">
             <table className="w-full min-w-max border-collapse text-xs">
               <thead>
@@ -250,6 +296,54 @@ export default function PointsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Pointudvikling runde for runde */}
+          {series.length > 0 && lastRound >= 1 && (() => {
+            const COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
+            const labels = COLS.slice(0, lastRound + 1);
+            const yMax = Math.max(1, ...series.map((s) => s.cum[lastRound] ?? 0));
+            const W = 760, H = 280, padL = 44, padR = 12, padT = 14, padB = 30;
+            const plotW = W - padL - padR, plotH = H - padT - padB;
+            const x = (i: number) => padL + (labels.length === 1 ? plotW / 2 : (i / (labels.length - 1)) * plotW);
+            const y = (v: number) => padT + (1 - v / yMax) * plotH;
+            const gridVals = [0, 0.25, 0.5, 0.75, 1].map((g) => Math.round(g * yMax));
+            return (
+              <div className="rounded-2xl border border-white/[0.08] bg-slate-950/55 p-5 shadow-xl backdrop-blur-md">
+                <p className="mb-4 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-blue-300/80">📈 Pointudvikling</p>
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 300 }}>
+                  {gridVals.map((gv, gi) => (
+                    <g key={gi}>
+                      <line x1={padL} y1={y(gv)} x2={W - padR} y2={y(gv)} stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
+                      <text x={padL - 6} y={y(gv) + 3} textAnchor="end" fontSize={10} fill="#64748b">{gv.toLocaleString("da-DK")}</text>
+                    </g>
+                  ))}
+                  {labels.map((lab, i) => (
+                    <text key={i} x={x(i)} y={H - 9} textAnchor="middle" fontSize={9} fill="#64748b">{lab}</text>
+                  ))}
+                  {series.map((s, idx) => {
+                    const color = COLORS[idx % COLORS.length];
+                    const path = labels.map((_, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(s.cum[i] ?? 0).toFixed(1)}`).join(" ");
+                    return (
+                      <g key={s.name}>
+                        <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                        {labels.map((_, i) => <circle key={i} cx={x(i)} cy={y(s.cum[i] ?? 0)} r={2.5} fill={color} />)}
+                      </g>
+                    );
+                  })}
+                </svg>
+                <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
+                  {series.map((s, idx) => (
+                    <span key={s.name} className="flex items-center gap-1.5 text-xs text-slate-300">
+                      <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                      {s.name} <span className="tabular-nums text-slate-500">{s.total.toLocaleString("da-DK")}</span>
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-3 text-center text-[0.65rem] text-slate-600">Kumulative point pr. spiller runde for runde</p>
+              </div>
+            );
+          })()}
           </div>
         )}
       </div>

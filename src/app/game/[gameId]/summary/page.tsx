@@ -94,6 +94,7 @@ type PlayerResult = {
   totalMedian: number;
   fairValueSum: number;
   winProb: number;
+  expectedLive: number; // live forventet slutpoint fra simuleringen
   vurdering: number; // 0–10
   bestDeals: { name: string; flag: string; pricePaid: number; value: number }[];
   unmatchedTeams: string[];
@@ -214,7 +215,7 @@ export default function SummaryPage() {
     const players = (playersRes.data ?? []) as { id: string; name: string; coins: number }[];
 
     // Byg foreløbige resultater (uden win-prob endnu)
-    const partial: Omit<PlayerResult, "winProb">[] = players.map((p) => {
+    const partial: Omit<PlayerResult, "winProb" | "expectedLive">[] = players.map((p) => {
       const teams = (teamsByOwner.get(p.id) ?? []).sort((a, b) => b.mean - a.mean);
       const coinsSpent = Math.max(0, STARTING_COINS - p.coins);
       const totalMean = teams.reduce((s, t) => s + t.mean, 0);
@@ -257,6 +258,7 @@ export default function SummaryPage() {
 
     let winProbs: Record<string, number>;
     let pw: Record<string, Record<string, number>>;
+    let expPts: Record<string, number>;
 
     if (canBuildBracket(allMatches)) {
       // Bracket-bevidst: simulér de faktiske knockout-kampe gennem træet
@@ -275,7 +277,7 @@ export default function SummaryPage() {
         else winnerHome = (m.home_score ?? 0) >= (m.away_score ?? 0);
         knownResults.set([hc, ac].sort().join("|"), winnerHome ? hc : ac);
       }
-      ({ winProb: winProbs, pairwise: pw } = simulateBracket(allMatches, {
+      ({ winProb: winProbs, pairwise: pw, expectedPoints: expPts } = simulateBracket(allMatches, {
         playerIds, basePoints, strength: buildStrengthMap(), ownerByTeam, knownResults, N: 8000,
       }));
     } else {
@@ -288,7 +290,7 @@ export default function SummaryPage() {
             : { mean: t.mean, stdDev: t.stdDev, floor: t.currentPoints },
         ),
       }));
-      ({ winProb: winProbs, pairwise: pw } = simulateStandings(sims, 8000));
+      ({ winProb: winProbs, pairwise: pw, expectedPoints: expPts } = simulateStandings(sims, 8000));
     }
 
     setSimulating(false);
@@ -297,6 +299,7 @@ export default function SummaryPage() {
     const full: PlayerResult[] = partial.map((p) => ({
       ...p,
       winProb: winProbs[p.playerId] ?? 0,
+      expectedLive: expPts[p.playerId] ?? 0,
     }));
 
     setResults(full);
@@ -541,13 +544,23 @@ export default function SummaryPage() {
                       </div>
 
                       {/* Forventede point */}
-                      <div className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2">
-                        <span className="text-xs text-slate-400">
-                          Forv. point ({sortKey === "mean" ? "gns" : "median"})
-                        </span>
-                        <span className={cn("text-sm font-bold tabular-nums", theme.accent)}>
-                          {pts.toLocaleString("da-DK")}
-                        </span>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between rounded-lg bg-emerald-500/[0.08] px-3 py-2">
+                          <span className="text-xs text-emerald-200/90">
+                            Forventet slutpoint <span className="text-emerald-300/60">(live)</span>
+                          </span>
+                          <span className="text-sm font-bold tabular-nums text-emerald-300">
+                            {Math.round(p.expectedLive).toLocaleString("da-DK")}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between rounded-lg bg-white/[0.04] px-3 py-2">
+                          <span className="text-xs text-slate-400">
+                            Før turnering ({sortKey === "mean" ? "gns" : "median"})
+                          </span>
+                          <span className={cn("text-sm font-bold tabular-nums", theme.accent)}>
+                            {pts.toLocaleString("da-DK")}
+                          </span>
+                        </div>
                       </div>
 
                       {/* Mønter brugt */}

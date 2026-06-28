@@ -99,6 +99,7 @@ export function buildR32(matches: TMatch[]): BuiltMatch[] {
 export type BracketSimResult = {
   winProb: Record<string, number>;
   pairwise: Record<string, Record<string, number>>;
+  expectedPoints: Record<string, number>;
 };
 
 /**
@@ -127,8 +128,9 @@ export function simulateBracket(
   const str = (t: string) => Math.max(1, strength.get(t) ?? 1);
 
   const wins: Record<string, number> = {};
+  const sum: Record<string, number> = {};
   const beats: Record<string, Record<string, number>> = {};
-  for (const a of playerIds) { wins[a] = 0; beats[a] = {}; for (const b of playerIds) beats[a][b] = 0; }
+  for (const a of playerIds) { wins[a] = 0; sum[a] = 0; beats[a] = {}; for (const b of playerIds) beats[a][b] = 0; }
 
   for (let it = 0; it < N; it++) {
     const winners = new Map<number, string>();
@@ -161,6 +163,7 @@ export function simulateBracket(
     for (const pid of playerIds) {
       const t = (basePoints.get(pid) ?? 0) + (pts.get(pid) ?? 0);
       totals[pid] = t;
+      sum[pid] += t;
       if (t > best) { best = t; bestId = pid; }
     }
     if (bestId) wins[bestId]++;
@@ -168,7 +171,8 @@ export function simulateBracket(
   }
 
   const winProb = Object.fromEntries(playerIds.map((id) => [id, wins[id] / N]));
+  const expectedPoints = Object.fromEntries(playerIds.map((id) => [id, sum[id] / N]));
   const pairwise: Record<string, Record<string, number>> = {};
   for (const a of playerIds) { pairwise[a] = {}; for (const b of playerIds) pairwise[a][b] = beats[a][b] / N; }
-  return { winProb, pairwise };
+  return { winProb, pairwise, expectedPoints };
 }

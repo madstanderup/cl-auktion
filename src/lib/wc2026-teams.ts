@@ -119,6 +119,8 @@ export type SimulationResult = {
   winProb: Record<string, number>;
   /** pairwise[a][b] = sandsynlighed for at spiller a slutter strengt bedre end b (0-1). */
   pairwise: Record<string, Record<string, number>>;
+  /** Forventet slutpoint pr. spiller (gennemsnit af simulerede totaler). */
+  expectedPoints: Record<string, number>;
 };
 
 /**
@@ -131,9 +133,11 @@ export function simulateStandings(
 ): SimulationResult {
   const ids = players.map((p) => p.playerId);
   const wins: Record<string, number> = {};
+  const sum: Record<string, number> = {};
   const beats: Record<string, Record<string, number>> = {};
   for (const a of ids) {
     wins[a] = 0;
+    sum[a] = 0;
     beats[a] = {};
     for (const b of ids) beats[a][b] = 0;
   }
@@ -150,6 +154,7 @@ export function simulateStandings(
         score += Math.max(t.floor ?? 0, draw);
       }
       scores[p] = score;
+      sum[ids[p]] += score;
       if (score > bestScore) { bestScore = score; bestIdx = p; }
     }
     if (bestIdx >= 0) wins[ids[bestIdx]]++;
@@ -163,11 +168,12 @@ export function simulateStandings(
   }
 
   const winProb = Object.fromEntries(ids.map((id) => [id, wins[id] / N]));
+  const expectedPoints = Object.fromEntries(ids.map((id) => [id, sum[id] / N]));
   const pairwise: Record<string, Record<string, number>> = {};
   for (const a of ids) {
     pairwise[a] = {};
     for (const b of ids) pairwise[a][b] = beats[a][b] / N;
   }
 
-  return { winProb, pairwise };
+  return { winProb, pairwise, expectedPoints };
 }

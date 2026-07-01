@@ -12,16 +12,8 @@ import {
 } from "@/lib/player-storage";
 import { findWC2026Team } from "@/lib/wc2026-teams";
 import { computeEliminatedTeams, countAlive } from "@/lib/tournament";
+import { calcTeamPoints, teamMatchPoints } from "@/lib/scoring";
 import { SideBetOffer } from "@/components/side-bet-offer";
-
-const STAGES = [
-  { key: "group",          label: "Gruppe" },
-  { key: "round_of_32",   label: "1/16" },
-  { key: "round_of_16",   label: "1/8" },
-  { key: "quarter_final", label: "KV" },
-  { key: "semi_final",    label: "SF" },
-  { key: "final",         label: "Finale" },
-];
 
 type Player = { id: string; name: string; coins: number; points: number };
 type MatchRow = {
@@ -31,32 +23,6 @@ type MatchRow = {
   match_date?: string | null;
 };
 
-const SHARE_STAGE_BONUS: Record<string, number> = {
-  round_of_32: 100, round_of_16: 200, quarter_final: 400, semi_final: 600, final: 800,
-};
-
-/** Point for ét hold i én afsluttet kamp (avancement-bonus kun til taberen). */
-function matchPointsForTeam(m: MatchRow, isHome: boolean): number {
-  if (m.status !== "finished" || m.home_score === null || m.away_score === null) return 0;
-  const my = isHome ? m.home_score : m.away_score;
-  const opp = isHome ? m.away_score : m.home_score;
-  let won = my > opp;
-  let lost = my < opp;
-  if (m.result_type === "penalties" && m.winner_side) {
-    won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
-    lost = !won;
-  }
-  const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-  let pts = 0;
-  if (m.stage === "group") {
-    pts += my === opp ? 50 : won ? 150 : 0;
-  } else {
-    if (isET) { pts += 50; if (won) pts += 50; } else if (won) pts += 150;
-    if (lost) pts += SHARE_STAGE_BONUS[m.stage] ?? 0; // avancement-bonus kun til taberen
-    if (m.stage === "final" && won) pts += 1000;
-  }
-  return pts;
-}
 type PlayerTeams = { player: Player; teams: { name: string; points: number; pricePaid: number }[] };
 
 function roiLabel(points: number, bid: number): string | null {
@@ -74,47 +40,6 @@ function makeRoiColorFn(allTeams: { points: number; pricePaid: number }[]) {
   };
 }
 
-function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
-  // Normaliser holdnavnet så "South Korea" → "Rep. of Korea" matcher wc_matches
-  const normalName = findWC2026Team(teamName)?.name ?? teamName;
-  let total = 0;
-  for (const stage of STAGES) {
-    const ms = matches.filter(
-      (m) => m.stage === stage.key && m.status === "finished" &&
-        (m.home_team === normalName || m.away_team === normalName),
-    );
-    for (const m of ms) {
-      const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
-      const isHome = m.home_team === normalName;
-      const myScore = isHome ? hs : as_, opScore = isHome ? as_ : hs;
-      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-      let won: boolean, lost: boolean;
-      if (m.result_type === "penalties" && m.winner_side) {
-        won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
-        lost = !won;
-      } else {
-        won = myScore > opScore;
-        lost = myScore < opScore;
-      }
-      if (stage.key === "group") {
-        if (hs === as_) total += 50;
-        else if (won) total += 150;
-      } else {
-        if (isET) { total += 50; if (won) total += 50; }
-        else if (won) total += 150;
-        if (lost) {
-          if (stage.key === "round_of_32") total += 100;
-          else if (stage.key === "round_of_16") total += 200;
-          else if (stage.key === "quarter_final") total += 400;
-          else if (stage.key === "semi_final") total += 600;
-          else if (stage.key === "final") total += 800;
-        }
-        if (stage.key === "final" && won) total += 1000;
-      }
-    }
-  }
-  return total;
-}
 
 export default function GamePage() {
   const params = useParams();
@@ -274,8 +199,8 @@ export default function GamePage() {
     for (const m of dayMatches) {
       const hOwner = ownerByTeam.get((findWC2026Team(m.home_team)?.name ?? m.home_team).toLowerCase());
       const aOwner = ownerByTeam.get((findWC2026Team(m.away_team)?.name ?? m.away_team).toLowerCase());
-      const hp = matchPointsForTeam(m, true);
-      const ap = matchPointsForTeam(m, false);
+      const hp = teamMatchPoints(m, true);
+      const ap = teamMatchPoints(m, false);
       if (hOwner && hp > 0) dayPts.set(hOwner, (dayPts.get(hOwner) ?? 0) + hp);
       if (aOwner && ap > 0) dayPts.set(aOwner, (dayPts.get(aOwner) ?? 0) + ap);
     }

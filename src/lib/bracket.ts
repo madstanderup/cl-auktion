@@ -58,10 +58,11 @@ const LATER: BracketNode[] = [
 
 const ALL_NODES = [...R32, ...LATER];
 const WIN_POINTS = 150;
-const LOSER_BONUS: Record<Round, number> = {
-  round_of_32: 100, round_of_16: 200, quarter_final: 400, semi_final: 600, final: 800,
+// Variant B: begge hold får "reach"-bonus for at nå runden; finalevinder +200.
+const REACH: Record<Round, number> = {
+  round_of_32: 100, round_of_16: 100, quarter_final: 200, semi_final: 200, final: 200,
 };
-const FINAL_WINNER_BONUS = 1000;
+const FINAL_WINNER_BONUS = 200;
 
 /** Kan vi konstruere bracket'en? (gruppespil færdigt + treer-kombination matcher skabelonen) */
 export function canBuildBracket(matches: TMatch[]): boolean {
@@ -168,8 +169,8 @@ export function simulateTeamPoints(
         if (Math.random() < pHome) { winner = home; loser = away; } else { winner = away; loser = home; }
       }
       winners.set(node.no, winner);
-      sum.set(winner, (sum.get(winner) ?? 0) + WIN_POINTS + (node.round === "final" ? FINAL_WINNER_BONUS : 0));
-      sum.set(loser, (sum.get(loser) ?? 0) + LOSER_BONUS[node.round]);
+      sum.set(winner, (sum.get(winner) ?? 0) + REACH[node.round] + WIN_POINTS + (node.round === "final" ? FINAL_WINNER_BONUS : 0));
+      sum.set(loser, (sum.get(loser) ?? 0) + REACH[node.round]);
     }
   }
 
@@ -237,8 +238,8 @@ export function simulateBracket(
 
       const wOwner = ownerByTeam.get(winner);
       const lOwner = ownerByTeam.get(loser);
-      if (wOwner) pts.set(wOwner, (pts.get(wOwner) ?? 0) + WIN_POINTS + (node.round === "final" ? FINAL_WINNER_BONUS : 0));
-      if (lOwner) pts.set(lOwner, (pts.get(lOwner) ?? 0) + LOSER_BONUS[node.round]);
+      if (wOwner) pts.set(wOwner, (pts.get(wOwner) ?? 0) + REACH[node.round] + WIN_POINTS + (node.round === "final" ? FINAL_WINNER_BONUS : 0));
+      if (lOwner) pts.set(lOwner, (pts.get(lOwner) ?? 0) + REACH[node.round]);
     }
 
     // Totaler = base + knockout

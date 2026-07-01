@@ -16,12 +16,13 @@ const STAGE_LABELS: Record<string, string> = {
   final:         "Finale",
 };
 
-const STAGE_BONUS: Record<string, number> = {
+// Variant B: begge hold får "reach"-bonus for at nå runden; finalevinder +200.
+const REACH: Record<string, number> = {
   round_of_32:   100,
-  round_of_16:   200,
-  quarter_final: 400,
-  semi_final:    600,
-  final:         800,
+  round_of_16:   100,
+  quarter_final: 200,
+  semi_final:    200,
+  final:         200,
 };
 
 type Goal = { minute: number; team: "home" | "away"; scorer: string };
@@ -66,20 +67,16 @@ function calcMatchPoints(match: Match, isHome: boolean): number {
   const myScore  = isHome ? match.homeScore : match.awayScore;
   const oppScore = isHome ? match.awayScore : match.homeScore;
   let won = myScore > oppScore;
-  let lost = myScore < oppScore;
   if (match.resultType === "penalties" && match.winnerSide) {
     won = (isHome && match.winnerSide === "home") || (!isHome && match.winnerSide === "away");
-    lost = !won;
   }
   const isET = match.resultType === "extra_time" || match.resultType === "penalties";
-  let pts = 0;
   if (match.stage === "group") {
-    pts += myScore === oppScore ? 50 : won ? 150 : 0;
-  } else {
-    if (isET) { pts += 50; if (won) pts += 50; } else if (won) pts += 150;
-    if (lost) pts += STAGE_BONUS[match.stage] ?? 0; // avancement-bonus kun til taberen
-    if (match.stage === "final" && won) pts += 1000;
+    return myScore === oppScore ? 50 : won ? 150 : 0;
   }
+  let pts = REACH[match.stage] ?? 0; // begge hold: point for at nå runden
+  if (isET) { pts += 50; if (won) pts += 50; } else if (won) pts += 150;
+  if (match.stage === "final" && won) pts += 200;
   return pts;
 }
 

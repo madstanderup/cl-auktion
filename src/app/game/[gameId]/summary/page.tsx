@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2, Trophy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team, simulateStandings, type PlayerSim } from "@/lib/wc2026-teams";
 import { computeEliminatedTeams } from "@/lib/tournament";
+import { calcTeamPoints } from "@/lib/scoring";
 import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
 import { formatStake } from "@/lib/side-bets";
 import { cn } from "@/lib/utils";
@@ -39,36 +40,6 @@ type TeamEntry = {
   fairPrice: number;
 };
 
-const _STAGES = ["group","round_of_32","round_of_16","quarter_final","semi_final","final"];
-const _STAGE_BONUS: Record<string, number> = { round_of_32:100, round_of_16:200, quarter_final:400, semi_final:600, final:800 };
-
-function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
-  const normalName = findWC2026Team(teamName)?.name ?? teamName;
-  let total = 0;
-  for (const stage of _STAGES) {
-    const ms = matches.filter((m) => m.stage === stage && m.status === "finished" && (m.home_team === normalName || m.away_team === normalName));
-    for (const m of ms) {
-      const isHome = m.home_team === normalName;
-      const myScore = isHome ? (m.home_score ?? 0) : (m.away_score ?? 0);
-      const opScore = isHome ? (m.away_score ?? 0) : (m.home_score ?? 0);
-      let won = myScore > opScore;
-      let lost = myScore < opScore;
-      if (m.result_type === "penalties" && m.winner_side) {
-        won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
-        lost = !won;
-      }
-      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-      if (stage === "group") {
-        total += myScore === opScore ? 50 : won ? 150 : 0;
-      } else {
-        if (isET) { total += 50; if (won) total += 50; } else if (won) total += 150;
-        if (lost) total += _STAGE_BONUS[stage] ?? 0; // avancement-bonus kun til taberen
-        if (stage === "final" && won) total += 1000;
-      }
-    }
-  }
-  return total;
-}
 
 function roiLabel(pts: number, bid: number) {
   if (bid <= 0) return pts > 0 ? "∞" : null;

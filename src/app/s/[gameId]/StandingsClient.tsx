@@ -4,69 +4,10 @@ import { useEffect, useState } from "react";
 import { Loader2, Trophy } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team } from "@/lib/wc2026-teams";
+import { calcTeamPoints, teamMatchPoints, type ScoreMatch } from "@/lib/scoring";
 import { cn } from "@/lib/utils";
 
-const STAGES = ["group", "round_of_32", "round_of_16", "quarter_final", "semi_final", "final"];
-const STAGE_BONUS: Record<string, number> = {
-  round_of_32: 100, round_of_16: 200, quarter_final: 400, semi_final: 600, final: 800,
-};
-
-type MatchRow = {
-  home_team: string; away_team: string; stage: string;
-  home_score: number | null; away_score: number | null;
-  result_type: string | null; winner_side: string | null; status: string;
-  match_date: string | null;
-};
-
-function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
-  const normalName = findWC2026Team(teamName)?.name ?? teamName;
-  let total = 0;
-  for (const stage of STAGES) {
-    const ms = matches.filter((m) => m.stage === stage && m.status === "finished" && (m.home_team === normalName || m.away_team === normalName));
-    for (const m of ms) {
-      const isHome = m.home_team === normalName;
-      const myScore = isHome ? (m.home_score ?? 0) : (m.away_score ?? 0);
-      const opScore = isHome ? (m.away_score ?? 0) : (m.home_score ?? 0);
-      let won = myScore > opScore;
-      let lost = myScore < opScore;
-      if (m.result_type === "penalties" && m.winner_side) {
-        won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
-        lost = !won;
-      }
-      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-      if (stage === "group") {
-        total += myScore === opScore ? 50 : won ? 150 : 0;
-      } else {
-        if (isET) { total += 50; if (won) total += 50; } else if (won) total += 150;
-        if (lost) total += STAGE_BONUS[stage] ?? 0; // avancement-bonus kun til taberen
-        if (stage === "final" && won) total += 1000;
-      }
-    }
-  }
-  return total;
-}
-
-function matchPointsForTeam(m: MatchRow, isHome: boolean): number {
-  if (m.status !== "finished" || m.home_score === null || m.away_score === null) return 0;
-  const my = isHome ? m.home_score : m.away_score;
-  const opp = isHome ? m.away_score : m.home_score;
-  let won = my > opp;
-  let lost = my < opp;
-  if (m.result_type === "penalties" && m.winner_side) {
-    won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
-    lost = !won;
-  }
-  const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-  let pts = 0;
-  if (m.stage === "group") {
-    pts += my === opp ? 50 : won ? 150 : 0;
-  } else {
-    if (isET) { pts += 50; if (won) pts += 50; } else if (won) pts += 150;
-    if (lost) pts += STAGE_BONUS[m.stage] ?? 0; // avancement-bonus kun til taberen
-    if (m.stage === "final" && won) pts += 1000;
-  }
-  return pts;
-}
+type MatchRow = ScoreMatch & { match_date: string | null };
 
 type Standing = { name: string; points: number; teams: number };
 type ResultLine = { home: string; away: string; homeFlag: string; awayFlag: string; hs: number; as: number; tag: string };
@@ -149,7 +90,7 @@ export default function StandingsClient({ gameId }: { gameId: string }) {
       for (const m of dayMatches) {
         const hOwner = ownerByTeam.get((findWC2026Team(m.home_team)?.name ?? m.home_team).toLowerCase());
         const aOwner = ownerByTeam.get((findWC2026Team(m.away_team)?.name ?? m.away_team).toLowerCase());
-        const hp = matchPointsForTeam(m, true), ap = matchPointsForTeam(m, false);
+        const hp = teamMatchPoints(m, true), ap = teamMatchPoints(m, false);
         if (hOwner && hp > 0) dayPts.set(hOwner, (dayPts.get(hOwner) ?? 0) + hp);
         if (aOwner && ap > 0) dayPts.set(aOwner, (dayPts.get(aOwner) ?? 0) + ap);
       }

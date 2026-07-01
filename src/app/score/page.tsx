@@ -10,17 +10,8 @@ import {
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
 import { supabase } from "@/lib/supabase";
-import { findWC2026Team } from "@/lib/wc2026-teams";
+import { calcTeamPoints } from "@/lib/scoring";
 import { cn } from "@/lib/utils";
-
-const STAGES = [
-  { key: "group",          label: "Gruppe" },
-  { key: "round_of_32",   label: "1/16" },
-  { key: "round_of_16",   label: "1/8" },
-  { key: "quarter_final", label: "KV" },
-  { key: "semi_final",    label: "SF" },
-  { key: "final",         label: "Finale" },
-];
 
 type Me = {
   id: string;
@@ -44,55 +35,6 @@ type MatchRow = {
   status: string;
 };
 
-function calcTeamPoints(teamName: string, matches: MatchRow[]): number {
-  const normalName = findWC2026Team(teamName)?.name ?? teamName;
-  let total = 0;
-  for (const stage of STAGES) {
-    const ms = matches.filter(
-      (m) =>
-        m.stage === stage.key &&
-        m.status === "finished" &&
-        (m.home_team === normalName || m.away_team === normalName),
-    );
-    for (const m of ms) {
-      const hs = m.home_score ?? 0;
-      const as_ = m.away_score ?? 0;
-      const isHome = m.home_team === normalName;
-      const myScore = isHome ? hs : as_;
-      const opScore = isHome ? as_ : hs;
-      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-      let won: boolean, lost: boolean;
-      if (m.result_type === "penalties" && m.winner_side) {
-        won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
-        lost = !won;
-      } else {
-        won = myScore > opScore;
-        lost = myScore < opScore;
-      }
-
-      if (stage.key === "group") {
-        if (hs === as_) total += 50;
-        else if (won) total += 150;
-      } else {
-        if (isET) {
-          total += 50;
-          if (won) total += 50;
-        } else if (won) {
-          total += 150;
-        }
-        if (lost) {
-          if (stage.key === "round_of_32") total += 100;
-          else if (stage.key === "round_of_16") total += 200;
-          else if (stage.key === "quarter_final") total += 400;
-          else if (stage.key === "semi_final") total += 600;
-          else if (stage.key === "final") total += 800;
-        }
-        if (stage.key === "final" && won) total += 1000;
-      }
-    }
-  }
-  return total;
-}
 
 export default function ScorePage() {
   const [gameId, setGameId] = useState<string | null>(null);

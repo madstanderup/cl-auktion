@@ -14,8 +14,9 @@ const KNOCKOUT_STAGES = [
   { key: "semi_final",    label: "1/2" },
   { key: "final",         label: "Finale" },
 ];
-const STAGE_BONUS: Record<string, number> = {
-  round_of_32: 100, round_of_16: 200, quarter_final: 400, semi_final: 600, final: 800,
+// Variant B: begge hold får "reach"-bonus for at nå runden; finalevinder +200.
+const REACH: Record<string, number> = {
+  round_of_32: 100, round_of_16: 100, quarter_final: 200, semi_final: 200, final: 200,
 };
 
 type MatchRow = {
@@ -53,13 +54,12 @@ function groupMatchPoints(m: MatchRow, isHome: boolean): number {
 }
 
 function knockoutMatchPoints(m: MatchRow, isHome: boolean): number {
-  const { won, lost } = wonLost(m, isHome);
+  const { won } = wonLost(m, isHome);
   const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-  let pts = 0;
+  let pts = REACH[m.stage] ?? 0; // begge hold: point for at nå runden
   if (isET) { pts += 50; if (won) pts += 50; }
   else if (won) pts += 150;
-  if (lost) pts += STAGE_BONUS[m.stage] ?? 0; // avancement-bonus til taberen
-  if (m.stage === "final" && won) pts += 1000;
+  if (m.stage === "final" && won) pts += 200;
   return pts;
 }
 

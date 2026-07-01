@@ -15,47 +15,10 @@ import {
   PLAYER_NAME_KEY,
 } from "@/lib/player-storage";
 import { cn } from "@/lib/utils";
-import { findWC2026Team } from "@/lib/wc2026-teams";
 import { computeEliminatedTeams, countAlive } from "@/lib/tournament";
+import { calcTeamPoints, type ScoreMatch } from "@/lib/scoring";
 
-const POINT_STAGES = ["group", "round_of_32", "round_of_16", "quarter_final", "semi_final", "final"];
-const POINT_STAGE_BONUS: Record<string, number> = {
-  round_of_32: 100, round_of_16: 200, quarter_final: 400, semi_final: 600, final: 800,
-};
-
-type PointMatch = {
-  home_team: string; away_team: string; stage: string;
-  home_score: number | null; away_score: number | null;
-  result_type: string | null; winner_side: string | null; status: string;
-};
-
-function calcTeamPoints(teamName: string, matches: PointMatch[]): number {
-  const normalName = findWC2026Team(teamName)?.name ?? teamName;
-  let total = 0;
-  for (const stage of POINT_STAGES) {
-    const ms = matches.filter((m) => m.stage === stage && m.status === "finished" && (m.home_team === normalName || m.away_team === normalName));
-    for (const m of ms) {
-      const isHome = m.home_team === normalName;
-      const myScore = isHome ? (m.home_score ?? 0) : (m.away_score ?? 0);
-      const opScore = isHome ? (m.away_score ?? 0) : (m.home_score ?? 0);
-      let won = myScore > opScore;
-      let lost = myScore < opScore;
-      if (m.result_type === "penalties" && m.winner_side) {
-        won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
-        lost = !won;
-      }
-      const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-      if (stage === "group") {
-        total += myScore === opScore ? 50 : won ? 150 : 0;
-      } else {
-        if (isET) { total += 50; if (won) total += 50; } else if (won) total += 150;
-        if (lost) total += POINT_STAGE_BONUS[stage] ?? 0; // avancement-bonus kun til taberen
-        if (stage === "final" && won) total += 1000;
-      }
-    }
-  }
-  return total;
-}
+type PointMatch = ScoreMatch;
 
 const STAR_POSITIONS: ReadonlyArray<{ top: string; left: string; opacity: number; size: number }> = [
   { top: "8%", left: "12%", opacity: 0.35, size: 1 },

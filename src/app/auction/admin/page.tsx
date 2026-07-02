@@ -18,6 +18,7 @@ import { supabase } from "@/lib/supabase";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatStake } from "@/lib/side-bets";
+import { AVAILABLE_TOURNAMENTS } from "@/lib/tournaments";
 
 type AuctionState = {
   current_team_name: string | null;
@@ -109,6 +110,7 @@ export default function AuctionAdminPage() {
   const [session, setSession] = useState<GameAdminSession | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [newGameLabel, setNewGameLabel] = useState("");
+  const [newTournamentType, setNewTournamentType] = useState("wc2026");
   const [newPlayerName, setNewPlayerName] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -357,13 +359,24 @@ export default function AuctionAdminPage() {
       const authClient = createClient();
       const { data: { user } } = await authClient.auth.getUser();
 
-      const { data, error } = await withTimeout(
+      let { data, error } = await withTimeout(
         supabase.rpc("create_game", {
           p_label: newGameLabel.trim() || null,
           p_created_by: user?.id ?? null,
+          p_tournament_type: newTournamentType,
         }),
         "Oprettelse af spil",
       );
+      if (error && /p_tournament_type|PGRST202/i.test(error.message)) {
+        // DB-migrationen er ikke kørt endnu — fald tilbage til gammel signatur (wc2026)
+        ({ data, error } = await withTimeout(
+          supabase.rpc("create_game", {
+            p_label: newGameLabel.trim() || null,
+            p_created_by: user?.id ?? null,
+          }),
+          "Oprettelse af spil",
+        ));
+      }
       if (error) {
         setMessage(`Kunne ikke oprette spil: ${error.message}`);
         return;
@@ -828,6 +841,21 @@ export default function AuctionAdminPage() {
                 placeholder="Fx. Fredagshygge"
                 className="mt-2 h-11 border-white/15 bg-white/[0.06] text-white"
               />
+              <label htmlFor="tournament-type" className="block text-xs font-medium text-slate-400 mt-4">
+                Turnering
+              </label>
+              <select
+                id="tournament-type"
+                value={newTournamentType}
+                onChange={(e) => setNewTournamentType(e.target.value)}
+                className="mt-2 h-11 w-full rounded-md border border-white/15 bg-white/[0.06] px-3 text-sm text-white focus:border-amber-400/50 focus:outline-none"
+              >
+                {AVAILABLE_TOURNAMENTS.map((t) => (
+                  <option key={t.id} value={t.id} disabled={!t.available}>
+                    {t.label}{!t.available ? " (kommer snart)" : ""}
+                  </option>
+                ))}
+              </select>
               <Button
                 type="button"
                 className="mt-4 w-full gap-2"

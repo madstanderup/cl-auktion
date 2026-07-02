@@ -31,8 +31,29 @@ export type ScoreMatch = {
   result_type: string | null; winner_side: string | null; status: string;
 };
 
+/** Pointregler — VM 2026-værdierne er default; andre turneringer kan give egne. */
+export type ScoringRules = {
+  groupWin: number;
+  groupDraw: number;
+  etBase: number;
+  etWin: number;
+  knockoutWin: number;
+  groupQualBonus: number;
+  qualOnWin: Record<string, number>;
+};
+
+export const WC2026_RULES: ScoringRules = {
+  groupWin: GROUP_WIN,
+  groupDraw: GROUP_DRAW,
+  etBase: ET_BASE,
+  etWin: ET_WIN,
+  knockoutWin: KNOCKOUT_WIN,
+  groupQualBonus: GROUP_QUAL_BONUS,
+  qualOnWin: QUAL_ON_WIN,
+};
+
 /** Point for ét hold i én afsluttet kamp (gruppe eller knockout). */
-export function teamMatchPoints(m: ScoreMatch, isHome: boolean): number {
+export function teamMatchPoints(m: ScoreMatch, isHome: boolean, rules: ScoringRules = WC2026_RULES): number {
   if (m.status !== "finished" || m.home_score === null || m.away_score === null) return 0;
   const my = isHome ? m.home_score : m.away_score;
   const op = isHome ? m.away_score : m.home_score;
@@ -41,13 +62,13 @@ export function teamMatchPoints(m: ScoreMatch, isHome: boolean): number {
     won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
   }
 
-  if (m.stage === "group") return my === op ? GROUP_DRAW : won ? GROUP_WIN : 0;
+  if (m.stage === "group") return my === op ? rules.groupDraw : won ? rules.groupWin : 0;
 
   const isET = m.result_type === "extra_time" || m.result_type === "penalties";
   let pts = 0;
-  if (isET) { pts += ET_BASE; if (won) pts += ET_WIN; }
-  else if (won) pts += KNOCKOUT_WIN;
-  if (won) pts += QUAL_ON_WIN[m.stage] ?? 0; // kvalifikation til næste runde ved sejr
+  if (isET) { pts += rules.etBase; if (won) pts += rules.etWin; }
+  else if (won) pts += rules.knockoutWin;
+  if (won) pts += rules.qualOnWin[m.stage] ?? 0; // kvalifikation til næste runde ved sejr
   return pts;
 }
 
@@ -56,21 +77,21 @@ export function teamMatchPoints(m: ScoreMatch, isHome: boolean): number {
  * Tildeles først når HELE gruppespillet er færdigspillet (bedste treere
  * kan ikke afgøres før), og kun til hold der gik videre.
  */
-export function groupQualBonus(teamName: string, matches: ScoreMatch[]): number {
+export function groupQualBonus(teamName: string, matches: ScoreMatch[], rules: ScoringRules = WC2026_RULES): number {
   if (!isGroupStageComplete(matches)) return 0;
   const norm = (findWC2026Team(teamName)?.name ?? teamName).toLowerCase();
   const advancers = computeGroupAdvancers(matches.filter((m) => m.stage === "group" && m.status === "finished"));
-  return advancers.has(norm) ? GROUP_QUAL_BONUS : 0;
+  return advancers.has(norm) ? rules.groupQualBonus : 0;
 }
 
 /** Samlede point for et hold ud fra alle afsluttede kampe (med navne-normalisering). */
-export function calcTeamPoints(teamName: string, matches: ScoreMatch[]): number {
+export function calcTeamPoints(teamName: string, matches: ScoreMatch[], rules: ScoringRules = WC2026_RULES): number {
   const norm = findWC2026Team(teamName)?.name ?? teamName;
-  let total = groupQualBonus(teamName, matches);
+  let total = groupQualBonus(teamName, matches, rules);
   for (const m of matches) {
     if (m.status !== "finished") continue;
-    if (m.home_team === norm) total += teamMatchPoints(m, true);
-    else if (m.away_team === norm) total += teamMatchPoints(m, false);
+    if (m.home_team === norm) total += teamMatchPoints(m, true, rules);
+    else if (m.away_team === norm) total += teamMatchPoints(m, false, rules);
   }
   return total;
 }

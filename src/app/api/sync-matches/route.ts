@@ -147,14 +147,25 @@ async function runSync(_req: Request) {
     });
   }
 
-  // 2. Hent alle spil og alle eksisterende wc_matches i ét kald
-  const [{ data: games, error: gamesErr }, { data: existingRows }] = await Promise.all([
-    supabase.from("games").select("id"),
-    supabase.from("wc_matches").select("id, game_id, zafronix_match_id, home_team, away_team, status"),
-  ]);
+  // 2. Hent VM-spil og alle eksisterende wc_matches i ét kald.
+  //    Kun spil med tournament_type='wc2026' synkroniseres fra VM-API'en
+  //    (fallback til alle spil hvis kolonnen endnu ikke findes).
+  let games: { id: string }[] | null = null;
+  {
+    const res = await supabase.from("games").select("id").eq("tournament_type", "wc2026");
+    if (res.error) {
+      const fallback = await supabase.from("games").select("id");
+      if (fallback.error) return NextResponse.json({ error: fallback.error.message }, { status: 500 });
+      games = fallback.data as { id: string }[];
+    } else {
+      games = res.data as { id: string }[];
+    }
+  }
+  const { data: existingRows } = await supabase
+    .from("wc_matches")
+    .select("id, game_id, zafronix_match_id, home_team, away_team, status");
 
-  if (gamesErr) return NextResponse.json({ error: gamesErr.message }, { status: 500 });
-  if (!games?.length) return NextResponse.json({ ok: true, synced: 0, message: "Ingen spil i DB." });
+  if (!games?.length) return NextResponse.json({ ok: true, synced: 0, message: "Ingen VM-spil i DB." });
 
   const gameIds = games.map((g) => String(g.id));
 

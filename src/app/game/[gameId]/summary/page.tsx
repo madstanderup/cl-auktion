@@ -239,19 +239,9 @@ export default function SummaryPage() {
       const basePoints = new Map(partial.map((p) => [p.playerId, p.teams.reduce((s, t) => s + t.currentPoints, 0)]));
       const ownerByTeam = new Map<string, string>();
       for (const p of partial) for (const t of p.teams) ownerByTeam.set(normName(t.name), p.playerId);
-      // Allerede spillede knockout-kampe (deterministiske)
-      const knownResults = new Map<string, string>();
-      for (const m of allMatches) {
-        if (m.status !== "finished" || m.stage === "group") continue;
-        if (m.home_team === "TBD" || m.away_team === "TBD") continue;
-        const hc = normName(m.home_team), ac = normName(m.away_team);
-        let winnerHome: boolean;
-        if (m.result_type === "penalties" && m.winner_side) winnerHome = m.winner_side === "home";
-        else winnerHome = (m.home_score ?? 0) >= (m.away_score ?? 0);
-        knownResults.set([hc, ac].sort().join("|"), winnerHome ? hc : ac);
-      }
+      // Spillede knockout-kampe låses automatisk af simulateBracket
       ({ winProb: winProbs, pairwise: pw, expectedPoints: expPts } = simulateBracket(allMatches, {
-        playerIds, basePoints, strength: buildStrengthMap(), ownerByTeam, knownResults, N: 8000,
+        playerIds, basePoints, strength: buildStrengthMap(), ownerByTeam, N: 8000,
       }));
     } else {
       // Før gruppespillet er slut: uafhængig model (før-turnerings-fordeling + gulv)

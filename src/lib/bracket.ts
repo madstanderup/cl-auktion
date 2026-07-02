@@ -141,15 +141,33 @@ export function buildFullBracket(matches: TMatch[]): BracketMatch[] {
   return out;
 }
 
+/** Spillede knockout-resultater som "a|b" (sorteret, kanonisk lowercase) → vinder. */
+export function knownResultsFromMatches(matches: TMatch[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const m of matches) {
+    if (m.status !== "finished" || m.stage === "group") continue;
+    if (m.home_team === "TBD" || m.away_team === "TBD") continue;
+    const hc = canonLower(m.home_team), ac = canonLower(m.away_team);
+    let winnerHome: boolean;
+    if (m.result_type === "penalties" && m.winner_side) winnerHome = m.winner_side === "home";
+    else winnerHome = (m.home_score ?? 0) >= (m.away_score ?? 0);
+    map.set([hc, ac].sort().join("|"), winnerHome ? hc : ac);
+  }
+  return map;
+}
+
 /**
  * Forventet slutpoint pr. hold (kanonisk navn, lowercase) = nuværende point +
- * gennemsnitligt simuleret knockout-udbytte gennem bracket'en.
+ * gennemsnitligt simuleret udbytte af de RESTERENDE kampe. Spillede kampe er
+ * låst (vinderen føres videre) og giver ingen sim-point — de ligger allerede
+ * i currentByTeam.
  */
 export function simulateTeamPoints(
   matches: TMatch[],
   opts: { strength: Map<string, number>; currentByTeam: Map<string, number>; knownResults?: Map<string, string>; N?: number },
 ): Map<string, number> {
-  const { strength, currentByTeam, knownResults, N = 20000 } = opts;
+  const { strength, currentByTeam, N = 20000 } = opts;
+  const knownResults = opts.knownResults ?? knownResultsFromMatches(matches);
   const seeds = resolveSeeds(matches);
   const resolve = (ref: Ref, winners: Map<number, string>): string | undefined =>
     "seed" in ref ? seeds.get(ref.seed) : winners.get(ref.win);
@@ -162,13 +180,10 @@ export function simulateTeamPoints(
       const home = resolve(node.home, winners);
       const away = resolve(node.away, winners);
       if (!home || !away) continue;
-      let winner: string;
-      const fixed = knownResults?.get([home, away].sort().join("|"));
-      if (fixed) { winner = fixed; }
-      else {
-        const pHome = str(home) / (str(home) + str(away));
-        winner = Math.random() < pHome ? home : away;
-      }
+      const fixed = knownResults.get([home, away].sort().join("|"));
+      if (fixed) { winners.set(node.no, fixed); continue; } // spillet — point ligger i current
+      const pHome = str(home) / (str(home) + str(away));
+      const winner = Math.random() < pHome ? home : away;
       winners.set(node.no, winner);
       sum.set(winner, (sum.get(winner) ?? 0) + WIN_POINTS + QUAL_ON_WIN[node.round]);
     }
@@ -206,7 +221,8 @@ export function simulateBracket(
     N?: number;
   },
 ): BracketSimResult {
-  const { playerIds, basePoints, strength, ownerByTeam, knownResults, N = 8000 } = opts;
+  const { playerIds, basePoints, strength, ownerByTeam, N = 8000 } = opts;
+  const knownResults = opts.knownResults ?? knownResultsFromMatches(matches);
   const seeds = resolveSeeds(matches);
   const resolve = (ref: Ref, winners: Map<number, string>): string | undefined =>
     "seed" in ref ? seeds.get(ref.seed) : winners.get(ref.win);
@@ -226,13 +242,10 @@ export function simulateBracket(
       const away = resolve(node.away, winners);
       if (!home || !away) continue;
 
-      let winner: string;
-      const fixed = knownResults?.get([home, away].sort().join("|"));
-      if (fixed) { winner = fixed; }
-      else {
-        const pHome = str(home) / (str(home) + str(away));
-        winner = Math.random() < pHome ? home : away;
-      }
+      const fixed = knownResults.get([home, away].sort().join("|"));
+      if (fixed) { winners.set(node.no, fixed); continue; } // spillet — point ligger i basePoints
+      const pHome = str(home) / (str(home) + str(away));
+      const winner = Math.random() < pHome ? home : away;
       winners.set(node.no, winner);
 
       const wOwner = ownerByTeam.get(winner);

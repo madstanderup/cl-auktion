@@ -13,6 +13,7 @@ import {
 import { LiveMatchTicker } from "@/components/live-match-ticker";
 import { SideBetInbox } from "@/components/side-bet-inbox";
 import { GameNav } from "@/components/game-nav";
+import { ScoringUpdateModal } from "@/components/scoring-update-modal";
 
 const SUPERADMIN_EMAIL = "madstanderup@gmail.com";
 
@@ -92,6 +93,7 @@ export default function GameLayout({ children }: { children: React.ReactNode }) 
       <LiveMatchTicker gameId={gameId} />
       <GameNav gameId={gameId} />
       <SideBetInbox gameId={gameId} />
+      <ScoringUpdateModal />
       {children}
     </>
   );

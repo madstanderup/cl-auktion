@@ -109,36 +109,46 @@ export default function ReglerPage() {
                 <p className="text-xs text-slate-500 mt-2 ml-1">Dvs. vinderen på forlænget/straffe: 100 pt i alt. Taberen: 50 pt i alt.</p>
               </div>
 
-              {/* Avancement */}
+              {/* Kvalifikations-bonus */}
               <div>
-                <h3 className="font-semibold text-white mb-2">Avancement-bonus <span className="text-slate-400 font-normal">(til det tabende hold)</span></h3>
-                <p className="text-xs text-slate-400 mb-2">Et hold der taber i en knockout-runde har alligevel nået langt — det belønner du for:</p>
+                <h3 className="font-semibold text-white mb-2">Kvalifikations-bonus <span className="text-slate-400 font-normal">(tildeles løbende)</span></h3>
+                <p className="text-xs text-slate-400 mb-2">
+                  Hver gang dit hold kvalificerer sig til en runde, får du point med det samme —
+                  efter gruppespillet, og derefter ved hver knockout-sejr:
+                </p>
                 <div className="space-y-1.5">
                   {[
-                    { stage: "Taber i 1/16-finale", pts: 100 },
-                    { stage: "Taber i 1/8-finale", pts: 200 },
-                    { stage: "Taber i kvartfinale", pts: 400 },
-                    { stage: "Taber i semifinale", pts: 600 },
-                    { stage: "Taber i finale (sølvmedalje)", pts: 800 },
+                    { stage: "Går videre fra gruppespillet (når alle grupper er slut)", pts: 100 },
+                    { stage: "Vinder 1/16-finalen → kvalificeret til 1/8", pts: 100 },
+                    { stage: "Vinder 1/8-finalen → kvalificeret til kvartfinale", pts: 200 },
+                    { stage: "Vinder kvartfinalen → kvalificeret til semifinale", pts: 200 },
+                    { stage: "Vinder semifinalen → kvalificeret til finalen", pts: 200 },
                   ].map(({ stage, pts }) => (
-                    <div key={stage} className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
+                    <div key={stage} className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.03] px-3 py-2">
                       <span>{stage}</span>
-                      <span className="font-bold text-amber-300">+{pts} pt</span>
+                      <span className="shrink-0 font-bold text-amber-300">+{pts} pt</span>
                     </div>
                   ))}
                 </div>
+                <p className="text-xs text-slate-500 mt-2 ml-1">
+                  Bonusserne kommer oven i kamppointene (sejr +150 osv.). Et hold der fx ryger ud i
+                  kvartfinalen har samlet 100 + 100 + 200 = 400 pt i kvalifikations-bonus undervejs.
+                </p>
               </div>
 
-              {/* Finalevinder */}
+              {/* Verdensmester */}
               <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Trophy className="size-4 text-amber-300" />
-                    <span className="font-semibold text-white">VM-vinder bonus</span>
+                    <span className="font-semibold text-white">Verdensmester-bonus (ved finalesejr)</span>
                   </div>
-                  <span className="text-2xl font-bold text-amber-300">+1.000 pt</span>
+                  <span className="text-2xl font-bold text-amber-300">+200 pt</span>
                 </div>
-                <p className="text-xs text-slate-400 mt-1">Ejeren af det hold der vinder VM får +1.000 point ekstra oven i de øvrige point.</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Vinderen af finalen har derudover samlet alle kvalifikations-bonusser undervejs
+                  (100+100+200+200+200 = 800 pt) — så VM-titlen er i alt 1.000 pt værd oven i kamppointene.
+                </p>
               </div>
 
               {/* Eksempel */}
@@ -154,27 +164,29 @@ export default function ReglerPage() {
                     <span className="text-amber-200">+50 pt</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-300">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England — VM-vinder bonus</span>
-                    <span className="text-amber-200">+1.000 pt</span>
+                    <span className="text-slate-300">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England — verdensmester-bonus</span>
+                    <span className="text-amber-200">+200 pt</span>
                   </div>
                   <div className="flex justify-between border-t border-white/10 pt-1.5 mt-1.5">
                     <span className="font-semibold text-white">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England i alt (denne kamp)</span>
-                    <span className="font-bold text-amber-300">1.100 pt</span>
+                    <span className="font-bold text-amber-300">300 pt</span>
                   </div>
                   <div className="border-t border-white/10 pt-1.5 mt-1.5 space-y-1.5">
                     <div className="flex justify-between">
                       <span className="text-slate-300">🇪🇬 Egypten — uafgjort i ordinær spilletid (begge)</span>
                       <span className="text-amber-200">+50 pt</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-300">🇪🇬 Egypten — taber i finale (avancement-bonus)</span>
-                      <span className="text-amber-200">+800 pt</span>
-                    </div>
                     <div className="flex justify-between border-t border-white/10 pt-1.5 mt-1.5">
                       <span className="font-semibold text-white">🇪🇬 Egypten i alt (denne kamp)</span>
-                      <span className="font-bold text-amber-300">850 pt</span>
+                      <span className="font-bold text-amber-300">50 pt</span>
                     </div>
                   </div>
+                  <p className="text-slate-500 pt-1.5 border-t border-white/10 mt-1.5">
+                    Begge hold har allerede banket deres kvalifikations-bonusser undervejs — bl.a.
+                    +200 for at nå finalen (tildelt ved semifinale-sejren). Egyptens samlede
+                    "sølvmedalje-udbytte" er derfor stadig 800 pt, og Englands VM-titel 1.000 pt —
+                    pointene kommer bare løbende i stedet for til sidst.
+                  </p>
                 </div>
               </div>
 
@@ -190,7 +202,7 @@ export default function ReglerPage() {
             <div className="px-5 py-4 space-y-3 text-sm text-slate-300">
               <p>Den spiller der har flest <strong className="text-white">turneringspoint i alt</strong> fra alle sine hold tilsammen, vinder spillet — uanset hvor mange mønter der er tilbage.</p>
               <div className="rounded-lg bg-emerald-500/10 border border-emerald-400/20 px-4 py-3">
-                <p className="text-xs text-emerald-200/80"><span className="font-semibold">Tip:</span> Det kan betale sig at købe mange mellemgode hold frem for ét fantastisk hold. Et hold der taber en semifinale giver 600 point i avancement-bonus — det er mere end en hel VM-vinder-grupperunde!</p>
+                <p className="text-xs text-emerald-200/80"><span className="font-semibold">Tip:</span> Det kan betale sig at købe mange mellemgode hold frem for ét fantastisk hold. Et hold der når semifinalen har samlet 600 point i kvalifikations-bonus undervejs — det er mere end en hel VM-vinder-grupperunde!</p>
               </div>
             </div>
           </section>

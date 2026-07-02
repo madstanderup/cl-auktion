@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team } from "@/lib/wc2026-teams";
 import { computeEliminatedTeams, type TMatch } from "@/lib/tournament";
@@ -103,10 +103,19 @@ export default function EstimatesPage() {
             <ArrowLeft className="size-4" /> Summary
           </button>
           <div className="h-4 w-px bg-white/10" />
-          <div>
+          <div className="flex-1">
             <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-slate-500">Holdestimater</p>
             <p className="text-sm font-medium text-white">{gameLabel}</p>
           </div>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-white/[0.08] hover:text-white transition-colors"
+            title="Genindlæser siden helt og genberegner alle estimater"
+          >
+            <RefreshCw className="size-3.5" />
+            Genberegn
+          </button>
         </div>
       </header>
 

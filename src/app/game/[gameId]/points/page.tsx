@@ -5,7 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Check, Loader2, RefreshCw, Share2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team } from "@/lib/wc2026-teams";
-import { groupQualBonus } from "@/lib/scoring";
+import { groupQualBonus, calcTeamPoints } from "@/lib/scoring";
+import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
 import { cn } from "@/lib/utils";
 
 const KNOCKOUT_STAGES = [
@@ -73,6 +74,7 @@ export default function PointsPage() {
   const [gameLabel, setGameLabel] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [shareDone, setShareDone] = useState(false);
+  const [estDev, setEstDev] = useState<{ labels: string[]; series: { name: string; values: number[] }[] } | null>(null);
 
   useEffect(() => { if (gameId) void load(); }, [gameId]);
 
@@ -176,6 +178,55 @@ export default function PointsPage() {
 
     setRows(built);
     setLoading(false);
+
+    // ── Estimeret slutpoint pr. runde-checkpoint (retrospektiv bracket-sim) ──
+    setEstDev(null);
+    if (canBuildBracket(matches)) {
+      // Kør async så tabellen renderes først
+      setTimeout(() => {
+        const gtRows = (gtRes.data ?? []) as Record<string, unknown>[];
+        const ownedByPlayer = new Map<string, string[]>(); // playerId → rå holdnavne
+        const ownerByTeam = new Map<string, string>();     // kanonisk (lower) → playerId
+        for (const gt of gtRows) {
+          const tn = teamNameById.get(String(gt.team_id));
+          const pid = gt.owner_player_id ? String(gt.owner_player_id) : null;
+          if (!tn || !pid) continue;
+          (ownedByPlayer.get(pid) ?? ownedByPlayer.set(pid, []).get(pid)!).push(tn);
+          ownerByTeam.set((findWC2026Team(tn)?.name ?? tn).toLowerCase(), pid);
+        }
+        const playerIds = [...ownedByPlayer.keys()];
+        if (playerIds.length === 0) return;
+
+        const stageOrder = ["round_of_32", "round_of_16", "quarter_final", "semi_final", "final"];
+        const stageLabel: Record<string, string> = { round_of_32: "Efter 1/16", round_of_16: "Efter 1/8", quarter_final: "Efter 1/4", semi_final: "Efter 1/2", final: "Efter finalen" };
+        const checkpoints: { label: string; stages: string[] }[] = [{ label: "Efter grupper", stages: [] }];
+        for (let i = 0; i < stageOrder.length; i++) {
+          if (matches.some((m) => m.stage === stageOrder[i] && m.status === "finished")) {
+            checkpoints.push({ label: stageLabel[stageOrder[i]], stages: stageOrder.slice(0, i + 1) });
+          }
+        }
+        if (checkpoints.length < 2) return; // først interessant når knockout er i gang
+
+        const strength = buildStrengthMap();
+        const labels: string[] = [];
+        const values = new Map<string, number[]>(playerIds.map((p) => [p, []]));
+        for (const cp of checkpoints) {
+          const allowed = new Set(["group", ...cp.stages]);
+          const truncated = matches.filter((m) => allowed.has(m.stage));
+          const basePoints = new Map<string, number>();
+          for (const [pid, names] of ownedByPlayer) {
+            basePoints.set(pid, names.reduce((s, n) => s + calcTeamPoints(n, truncated), 0));
+          }
+          const res = simulateBracket(truncated, { playerIds, basePoints, strength, ownerByTeam, N: 4000 });
+          labels.push(cp.label);
+          for (const pid of playerIds) values.get(pid)!.push(Math.round(res.expectedPoints[pid] ?? 0));
+        }
+        const series = playerIds
+          .map((pid) => ({ name: playerNameById.get(pid) ?? "?", values: values.get(pid)! }))
+          .sort((a, b) => (b.values.at(-1) ?? 0) - (a.values.at(-1) ?? 0));
+        setEstDev({ labels, series });
+      }, 0);
+    }
   }
 
   const COLS = ["1. runde", "2. runde", "3. runde", ...KNOCKOUT_STAGES.map((s) => s.label)];
@@ -346,6 +397,67 @@ export default function PointsPage() {
                   ))}
                 </div>
                 <p className="mt-3 text-center text-[0.65rem] text-slate-600">Kumulative point pr. spiller runde for runde</p>
+              </div>
+            );
+          })()}
+
+          {/* Estimeret slutpoint pr. runde (retrospektiv simulering) */}
+          {estDev && estDev.labels.length >= 2 && (() => {
+            const COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
+            const { labels, series: est } = estDev;
+            const allVals = est.flatMap((s) => s.values);
+            const vMax = Math.max(...allVals), vMin = Math.min(...allVals);
+            const pad = Math.max(50, (vMax - vMin) * 0.1);
+            const yTop = vMax + pad, yBot = Math.max(0, vMin - pad);
+            const W = 760, H = 280, padL = 48, padR = 12, padT = 14, padB = 30;
+            const plotW = W - padL - padR, plotH = H - padT - padB;
+            const x = (i: number) => padL + (labels.length === 1 ? plotW / 2 : (i / (labels.length - 1)) * plotW);
+            const y = (v: number) => padT + (1 - (v - yBot) / (yTop - yBot)) * plotH;
+            const gridVals = [0, 0.25, 0.5, 0.75, 1].map((g) => Math.round(yBot + g * (yTop - yBot)));
+            return (
+              <div className="rounded-2xl border border-white/[0.08] bg-slate-950/55 p-5 shadow-xl backdrop-blur-md">
+                <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-emerald-300/80">🔮 Estimeret slutpoint — udvikling pr. runde</p>
+                <p className="mb-4 text-[0.65rem] text-slate-500">
+                  Hvad bracket-simuleringen ville have estimeret hver spillers slutpoint til efter hver runde
+                </p>
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 300 }}>
+                  {gridVals.map((gv, gi) => (
+                    <g key={gi}>
+                      <line x1={padL} y1={y(gv)} x2={W - padR} y2={y(gv)} stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
+                      <text x={padL - 6} y={y(gv) + 3} textAnchor="end" fontSize={10} fill="#64748b">{gv.toLocaleString("da-DK")}</text>
+                    </g>
+                  ))}
+                  {labels.map((lab, i) => (
+                    <text key={i} x={x(i)} y={H - 9} textAnchor="middle" fontSize={9} fill="#64748b">{lab}</text>
+                  ))}
+                  {est.map((s, idx) => {
+                    const color = COLORS[idx % COLORS.length];
+                    const path = labels.map((_, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(s.values[i] ?? 0).toFixed(1)}`).join(" ");
+                    return (
+                      <g key={s.name}>
+                        <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                        {labels.map((_, i) => <circle key={i} cx={x(i)} cy={y(s.values[i] ?? 0)} r={2.5} fill={color} />)}
+                      </g>
+                    );
+                  })}
+                </svg>
+                <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
+                  {est.map((s, idx) => {
+                    const delta = (s.values.at(-1) ?? 0) - (s.values[0] ?? 0);
+                    return (
+                      <span key={s.name} className="flex items-center gap-1.5 text-xs text-slate-300">
+                        <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                        {s.name} <span className="tabular-nums text-slate-500">{(s.values.at(-1) ?? 0).toLocaleString("da-DK")}</span>
+                        <span className={cn("tabular-nums text-[0.65rem]", delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-slate-600")}>
+                          ({delta > 0 ? "+" : ""}{delta.toLocaleString("da-DK")})
+                        </span>
+                      </span>
+                    );
+                  })}
+                </div>
+                <p className="mt-3 text-center text-[0.65rem] text-slate-600">
+                  4.000 simuleringer pr. checkpoint · spillede kampe til og med runden er låst, resten simuleres
+                </p>
               </div>
             );
           })()}

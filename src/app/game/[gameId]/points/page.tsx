@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Check, Loader2, RefreshCw, Share2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team } from "@/lib/wc2026-teams";
+import { groupQualBonus } from "@/lib/scoring";
 import { cn } from "@/lib/utils";
 
 const KNOCKOUT_STAGES = [
@@ -14,9 +15,9 @@ const KNOCKOUT_STAGES = [
   { key: "semi_final",    label: "1/2" },
   { key: "final",         label: "Finale" },
 ];
-// Variant B: begge hold får "reach"-bonus for at nå runden; finalevinder +200.
-const REACH: Record<string, number> = {
-  round_of_32: 100, round_of_16: 100, quarter_final: 200, semi_final: 200, final: 200,
+// Kvalifikations-bonus tildelt ved SEJR i runden (finale-sejr = mester-bonus).
+const QUAL_ON_WIN: Record<string, number> = {
+  round_of_32: 100, round_of_16: 200, quarter_final: 200, semi_final: 200, final: 200,
 };
 
 type MatchRow = {
@@ -56,10 +57,10 @@ function groupMatchPoints(m: MatchRow, isHome: boolean): number {
 function knockoutMatchPoints(m: MatchRow, isHome: boolean): number {
   const { won } = wonLost(m, isHome);
   const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-  let pts = REACH[m.stage] ?? 0; // begge hold: point for at nå runden
+  let pts = 0;
   if (isET) { pts += 50; if (won) pts += 50; }
   else if (won) pts += 150;
-  if (m.stage === "final" && won) pts += 200;
+  if (won) pts += QUAL_ON_WIN[m.stage] ?? 0; // kvalifikation til næste runde
   return pts;
 }
 
@@ -130,6 +131,10 @@ export default function PointsPage() {
         if (!m || m.status !== "finished") return null;
         return groupMatchPoints(m, m.home_team === canon);
       });
+      // Kvalifikation til 1/16 (+100): tildeles efter 3. gruppekamp (når hele
+      // gruppespillet er slut og holdet er gået videre)
+      const qual = groupQualBonus(teamName, matches);
+      if (qual > 0 && group[2] !== null) group[2] = (group[2] ?? 0) + qual;
 
       // Knockout-runder
       const knockout: (number | null)[] = KNOCKOUT_STAGES.map((s) => {

@@ -16,10 +16,11 @@ const STAGE_LABELS: Record<string, string> = {
   final:         "Finale",
 };
 
-// Variant B: begge hold får "reach"-bonus for at nå runden; finalevinder +200.
-const REACH: Record<string, number> = {
+// Kvalifikations-bonus tildelt ved SEJR i runden (kvalificerer til næste
+// runde; finale-sejr = verdensmester-bonus).
+const QUAL_ON_WIN: Record<string, number> = {
   round_of_32:   100,
-  round_of_16:   100,
+  round_of_16:   200,
   quarter_final: 200,
   semi_final:    200,
   final:         200,
@@ -74,9 +75,9 @@ function calcMatchPoints(match: Match, isHome: boolean): number {
   if (match.stage === "group") {
     return myScore === oppScore ? 50 : won ? 150 : 0;
   }
-  let pts = REACH[match.stage] ?? 0; // begge hold: point for at nå runden
+  let pts = 0;
   if (isET) { pts += 50; if (won) pts += 50; } else if (won) pts += 150;
-  if (match.stage === "final" && won) pts += 200;
+  if (won) pts += QUAL_ON_WIN[match.stage] ?? 0; // kvalifikation til næste runde
   return pts;
 }
 

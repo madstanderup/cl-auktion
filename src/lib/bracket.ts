@@ -58,11 +58,12 @@ const LATER: BracketNode[] = [
 
 const ALL_NODES = [...R32, ...LATER];
 const WIN_POINTS = 150;
-// Variant B: begge hold får "reach"-bonus for at nå runden; finalevinder +200.
-const REACH: Record<Round, number> = {
-  round_of_32: 100, round_of_16: 100, quarter_final: 200, semi_final: 200, final: 200,
+// Kvalifikations-bonus tildelt VED SEJR i runden (kvalificerer til næste
+// runde; finale-sejr = verdensmester-bonus). Kvalifikationen til 1/16
+// (+100) ligger i holdets nuværende point (tildelt efter gruppespillet).
+const QUAL_ON_WIN: Record<Round, number> = {
+  round_of_32: 100, round_of_16: 200, quarter_final: 200, semi_final: 200, final: 200,
 };
-const FINAL_WINNER_BONUS = 200;
 
 /** Kan vi konstruere bracket'en? (gruppespil færdigt + treer-kombination matcher skabelonen) */
 export function canBuildBracket(matches: TMatch[]): boolean {
@@ -161,16 +162,15 @@ export function simulateTeamPoints(
       const home = resolve(node.home, winners);
       const away = resolve(node.away, winners);
       if (!home || !away) continue;
-      let winner: string, loser: string;
+      let winner: string;
       const fixed = knownResults?.get([home, away].sort().join("|"));
-      if (fixed) { winner = fixed; loser = fixed === home ? away : home; }
+      if (fixed) { winner = fixed; }
       else {
         const pHome = str(home) / (str(home) + str(away));
-        if (Math.random() < pHome) { winner = home; loser = away; } else { winner = away; loser = home; }
+        winner = Math.random() < pHome ? home : away;
       }
       winners.set(node.no, winner);
-      sum.set(winner, (sum.get(winner) ?? 0) + REACH[node.round] + WIN_POINTS + (node.round === "final" ? FINAL_WINNER_BONUS : 0));
-      sum.set(loser, (sum.get(loser) ?? 0) + REACH[node.round]);
+      sum.set(winner, (sum.get(winner) ?? 0) + WIN_POINTS + QUAL_ON_WIN[node.round]);
     }
   }
 
@@ -226,20 +226,17 @@ export function simulateBracket(
       const away = resolve(node.away, winners);
       if (!home || !away) continue;
 
-      let winner: string, loser: string;
+      let winner: string;
       const fixed = knownResults?.get([home, away].sort().join("|"));
-      if (fixed) { winner = fixed; loser = fixed === home ? away : home; }
+      if (fixed) { winner = fixed; }
       else {
         const pHome = str(home) / (str(home) + str(away));
-        if (Math.random() < pHome) { winner = home; loser = away; }
-        else { winner = away; loser = home; }
+        winner = Math.random() < pHome ? home : away;
       }
       winners.set(node.no, winner);
 
       const wOwner = ownerByTeam.get(winner);
-      const lOwner = ownerByTeam.get(loser);
-      if (wOwner) pts.set(wOwner, (pts.get(wOwner) ?? 0) + REACH[node.round] + WIN_POINTS + (node.round === "final" ? FINAL_WINNER_BONUS : 0));
-      if (lOwner) pts.set(lOwner, (pts.get(lOwner) ?? 0) + REACH[node.round]);
+      if (wOwner) pts.set(wOwner, (pts.get(wOwner) ?? 0) + WIN_POINTS + QUAL_ON_WIN[node.round]);
     }
 
     // Totaler = base + knockout

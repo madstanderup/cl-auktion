@@ -14,11 +14,10 @@ const REGISTRY: Record<string, TournamentConfig> = {
   cl2627: CL2627,
 };
 
-/** Turneringer der kan vælges ved spiloprettelse.
- *  CL åbnes når siderne er wiret til turnerings-konfigurationen. */
+/** Turneringer der kan vælges ved spiloprettelse. */
 export const AVAILABLE_TOURNAMENTS: { id: TournamentId; label: string; available: boolean }[] = [
   { id: "wc2026", label: "VM 2026", available: true },
-  { id: "cl2627", label: "Champions League 26/27", available: false },
+  { id: "cl2627", label: "Champions League 26/27 (beta — dummy-hold)", available: true },
 ];
 
 /**

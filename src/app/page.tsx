@@ -15,8 +15,8 @@ import {
   PLAYER_NAME_KEY,
 } from "@/lib/player-storage";
 import { cn } from "@/lib/utils";
-import { computeEliminatedTeams, countAlive } from "@/lib/tournament";
-import { calcTeamPoints, type ScoreMatch } from "@/lib/scoring";
+import { type ScoreMatch } from "@/lib/scoring";
+import { getTournament, calcPointsForTournament, eliminatedForTournament, countAliveForTournament } from "@/lib/tournaments";
 
 type PointMatch = ScoreMatch;
 
@@ -142,17 +142,20 @@ export default function Home() {
       const gameIds = playerRows.map((p) => String(p.game_id));
 
       // Fetch game info, auction states, matches og ejerskaber parallelt
-      const [gamesRes, auctionRes, matchesRes, gtRes, teamsRes] = await Promise.all([
-        supabase.from("games").select("id, invite_code, label").in("id", gameIds),
+      let gamesRes = await supabase.from("games").select("id, invite_code, label, tournament_type").in("id", gameIds);
+      if (gamesRes.error) {
+        gamesRes = (await supabase.from("games").select("id, invite_code, label").in("id", gameIds)) as typeof gamesRes;
+      }
+      const [auctionRes, matchesRes, gtRes, teamsRes] = await Promise.all([
         supabase.from("auction_state").select("game_id, status").in("game_id", gameIds),
         supabase.from("wc_matches").select("game_id,home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").in("game_id", gameIds),
         supabase.from("game_teams").select("game_id, team_id, owner_player_id").in("game_id", gameIds).not("owner_player_id", "is", null),
         supabase.from("teams").select("id, name"),
       ]);
 
-      const gameMap = new Map<string, { invite_code: string; label: string | null }>();
-      for (const g of gamesRes.data ?? []) {
-        gameMap.set(String(g.id), { invite_code: g.invite_code as string, label: g.label as string | null });
+      const gameMap = new Map<string, { invite_code: string; label: string | null; tournament_type: string | null }>();
+      for (const g of (gamesRes.data ?? []) as Record<string, unknown>[]) {
+        gameMap.set(String(g.id), { invite_code: g.invite_code as string, label: (g.label as string | null) ?? null, tournament_type: (g.tournament_type as string | null) ?? null });
       }
 
       const auctionMap = new Map<string, string>();
@@ -186,13 +189,14 @@ export default function Home() {
         const tname = teamNameById.get(String(gt.team_id));
         if (!tname) continue;
         const matches = matchesByGame.get(String(gt.game_id)) ?? [];
-        pointsByPlayer.set(pid, (pointsByPlayer.get(pid) ?? 0) + calcTeamPoints(tname, matches));
+        const gcfg = getTournament(gameMap.get(String(gt.game_id))?.tournament_type);
+        pointsByPlayer.set(pid, (pointsByPlayer.get(pid) ?? 0) + calcPointsForTournament(gcfg, tname, matches));
         (teamsByPlayer.get(pid) ?? teamsByPlayer.set(pid, []).get(pid)!).push(tname);
       }
 
       // Udryddede hold pr. spil
       const eliminatedByGame = new Map<string, Set<string>>();
-      for (const gid of gameIds) eliminatedByGame.set(gid, computeEliminatedTeams(matchesByGame.get(gid) ?? []));
+      for (const gid of gameIds) eliminatedByGame.set(gid, eliminatedForTournament(getTournament(gameMap.get(gid)?.tournament_type), matchesByGame.get(gid) ?? []));
 
       const games: MyGame[] = playerRows.map((p) => {
         const gid = String(p.game_id);
@@ -209,7 +213,7 @@ export default function Home() {
           label: gInfo?.label ?? null,
           auction_status: auctionMap.get(gid) ?? null,
           teams_total: myTeams.length,
-          teams_alive: countAlive(myTeams, elim),
+          teams_alive: countAliveForTournament(getTournament(gInfo?.tournament_type), myTeams, elim),
           tournament_started: (matchesByGame.get(gid) ?? []).some((m) => m.status === "finished"),
         };
       });

@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { findWC2026Team } from "@/lib/wc2026-teams";
-import { calcTeamPoints, type ScoreMatch } from "@/lib/scoring";
+import { type ScoreMatch } from "@/lib/scoring";
+import { getTournamentForGame, calcPointsForTournament } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
 type MatchRow = ScoreMatch;
@@ -31,6 +31,8 @@ export function LiveMatchTicker({ gameId }: { gameId: string }) {
   }, [gameId]);
 
   async function load() {
+    const cfg = await getTournamentForGame(gameId);
+    const findTeam = cfg.findTeam;
     const [matchesRes, gtRes, playersRes] = await Promise.all([
       supabase.from("wc_matches")
         .select("id,home_team,away_team,stage,home_score,away_score,result_type,winner_side,status")
@@ -57,7 +59,7 @@ export function LiveMatchTicker({ gameId }: { gameId: string }) {
       const t = (teamRows ?? []).find((r) => String(r.id) === String(gt.team_id));
       if (!t) continue;
       const raw = String(t.name);
-      const canon = findWC2026Team(raw)?.name ?? raw;
+      const canon = findTeam(raw)?.name ?? raw;
       const pid = String(gt.owner_player_id);
       ownerIdByTeamName.set(canon.toLowerCase(), pid);
       ownerIdByTeamName.set(raw.toLowerCase(), pid);
@@ -69,11 +71,11 @@ export function LiveMatchTicker({ gameId }: { gameId: string }) {
     // Spillerens totale point = sum over alle ejede hold
     const totalByPlayerId = new Map<string, number>();
     for (const [pid, teams] of ownedTeamsByPlayerId) {
-      totalByPlayerId.set(pid, teams.reduce((s, t) => s + calcTeamPoints(t, allMatches), 0));
+      totalByPlayerId.set(pid, teams.reduce((s, t) => s + calcPointsForTournament(cfg, t, allMatches), 0));
     }
 
     function ownerInfo(teamName: string): { name: string; points: number } | null {
-      const canon = findWC2026Team(teamName)?.name ?? teamName;
+      const canon = findTeam(teamName)?.name ?? teamName;
       const pid = ownerIdByTeamName.get(canon.toLowerCase());
       if (!pid) return null;
       const name = playerById.get(pid);
@@ -82,13 +84,13 @@ export function LiveMatchTicker({ gameId }: { gameId: string }) {
     }
 
     setLiveMatches(live.map((m) => {
-      const homeTeam = findWC2026Team(m.home_team)?.name ?? m.home_team;
-      const awayTeam = findWC2026Team(m.away_team)?.name ?? m.away_team;
+      const homeTeam = findTeam(m.home_team)?.name ?? m.home_team;
+      const awayTeam = findTeam(m.away_team)?.name ?? m.away_team;
       return {
         id: m.id,
         homeTeam, awayTeam,
-        homeFlag: findWC2026Team(homeTeam)?.flag ?? "🏳",
-        awayFlag: findWC2026Team(awayTeam)?.flag ?? "🏳",
+        homeFlag: findTeam(homeTeam)?.flag ?? "🏳",
+        awayFlag: findTeam(awayTeam)?.flag ?? "🏳",
         homeScore: m.home_score ?? 0,
         awayScore: m.away_score ?? 0,
         homeOwner: ownerInfo(m.home_team),

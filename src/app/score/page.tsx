@@ -10,7 +10,7 @@ import {
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
 import { supabase } from "@/lib/supabase";
-import { calcTeamPoints } from "@/lib/scoring";
+import { getTournamentForGame, calcPointsForTournament, type TournamentConfig } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
 type Me = {
@@ -49,6 +49,7 @@ export default function ScorePage() {
   const load = useCallback(async (gid: string, pid: string) => {
     setLoading(true);
     setError(null);
+    const cfg: TournamentConfig = await getTournamentForGame(gid);
 
     const [{ data: gameRow }, { data: self, error: selfErr }, { data: gtAll }, { data: all }, { data: matchData }] =
       await Promise.all([
@@ -115,7 +116,7 @@ export default function ScorePage() {
       const nm = r.teams?.name;
       const oid = r.owner_player_id ? String(r.owner_player_id) : null;
       if (!nm || !oid) continue;
-      const pts = calcTeamPoints(String(nm), matches);
+      const pts = calcPointsForTournament(cfg, String(nm), matches);
       pointsByPlayer.set(oid, (pointsByPlayer.get(oid) ?? 0) + pts);
       if (oid === pid) myTeamRows.push({ name: String(nm), points: pts });
     }

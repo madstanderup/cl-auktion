@@ -5,7 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Download, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import { calcTeamPoints, type ScoreMatch } from "@/lib/scoring";
+import { type ScoreMatch } from "@/lib/scoring";
+import { getTournamentForGame, calcPointsForTournament } from "@/lib/tournaments";
 import { buttonVariants } from "@/components/ui/button";
 import Link from "next/link";
 
@@ -54,6 +55,7 @@ export default function BidsPage() {
 
   async function load() {
     setLoading(true);
+    const cfg = await getTournamentForGame(gameId);
 
     const [gameRes, playersRes, bidsRes, teamsRes, teamNamesRes, matchesRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
@@ -126,7 +128,7 @@ export default function BidsPage() {
         teamName,
         firstBidAt,
         winnerPlayerId: ownerByTeamName.get(teamName) ?? null,
-        teamPoints: calcTeamPoints(teamName, matches),
+        teamPoints: calcPointsForTournament(cfg, teamName, matches),
         bids: Object.fromEntries(latestByPlayer),
       };
     });

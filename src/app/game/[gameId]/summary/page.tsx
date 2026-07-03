@@ -5,10 +5,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Trophy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { findWC2026Team, simulateStandings, type PlayerSim } from "@/lib/wc2026-teams";
-import { computeEliminatedTeams } from "@/lib/tournament";
-import { calcTeamPoints } from "@/lib/scoring";
+import { simulateStandings, type PlayerSim } from "@/lib/wc2026-teams";
 import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
+import { getTournament, getTournamentForGame, calcPointsForTournament, eliminatedForTournament, type TournamentConfig } from "@/lib/tournaments";
 import { formatStake } from "@/lib/side-bets";
 import { cn } from "@/lib/utils";
 
@@ -101,6 +100,7 @@ export default function SummaryPage() {
   const gameId = params.gameId as string;
 
   const [results, setResults] = useState<PlayerResult[]>([]);
+  const [tournament, setTournament] = useState<TournamentConfig>(() => getTournament("wc2026"));
   const [pairwise, setPairwise] = useState<Record<string, Record<string, number>>>({});
   const [history, setHistory] = useState<SnapshotRow[]>([]);
   const [eliminated, setEliminated] = useState<Set<string>>(new Set());
@@ -119,6 +119,8 @@ export default function SummaryPage() {
 
   async function load() {
     setLoading(true);
+    const cfg = await getTournamentForGame(gameId);
+    setTournament(cfg);
 
     const [gameRes, auctionRes, playersRes, gtRes, bidsRes, matchesRes, sideBetsRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
@@ -168,13 +170,13 @@ export default function SummaryPage() {
       const pid = row.owner_player_id;
       const tname = teamNameById.get(row.team_id);
       if (!tname) continue;
-      const wc = findWC2026Team(tname);
+      const wc = cfg.findTeam(tname);
       const pricePaid = paidMap.get(paidKey(tname, pid)) ?? 0;
       const entry: TeamEntry = {
         name: tname,
         flag: wc?.flag ?? "🏳",
         pricePaid,
-        currentPoints: calcTeamPoints(tname, allMatches),
+        currentPoints: calcPointsForTournament(cfg, tname, allMatches),
         mean: wc?.mean ?? 0,
         median: wc?.median ?? 0,
         stdDev: wc?.stdDev ?? 0,
@@ -224,8 +226,8 @@ export default function SummaryPage() {
     // hold der stadig er med beholder før-turnerings-fordelingen, men med
     // allerede scorede point som gulv.
     setSimulating(true);
-    const eliminated = computeEliminatedTeams(allMatches);
-    const normName = (n: string) => (findWC2026Team(n)?.name ?? n).toLowerCase();
+    const eliminated = eliminatedForTournament(cfg, allMatches);
+    const normName = (n: string) => (cfg.findTeam(n)?.name ?? n).toLowerCase();
     // Kør async så UI ikke fryser
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -233,7 +235,7 @@ export default function SummaryPage() {
     let pw: Record<string, Record<string, number>>;
     let expPts: Record<string, number>;
 
-    if (canBuildBracket(allMatches)) {
+    if (cfg.hasBracket && canBuildBracket(allMatches)) {
       // Bracket-bevidst: simulér de faktiske knockout-kampe gennem træet
       const playerIds = partial.map((p) => p.playerId);
       const basePoints = new Map(partial.map((p) => [p.playerId, p.teams.reduce((s, t) => s + t.currentPoints, 0)]));
@@ -364,7 +366,7 @@ export default function SummaryPage() {
             {/* ── Titel ── */}
             <div className="text-center">
               <h1 className="text-3xl font-extrabold uppercase tracking-[0.12em] text-white sm:text-4xl">
-                VM Auktion – Slutresultat
+                {tournament.id === "wc2026" ? "VM Auktion" : tournament.label} – Slutresultat
               </h1>
               <p className="mt-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
                 Overblik over alle hold, køb og vurderinger
@@ -431,7 +433,7 @@ export default function SummaryPage() {
                           </span>
                         </div>
                         {(() => {
-                          const alive = p.teams.filter((t) => !eliminated.has((findWC2026Team(t.name)?.name ?? t.name).toLowerCase())).length;
+                          const alive = p.teams.filter((t) => !eliminated.has((tournament.findTeam(t.name)?.name ?? t.name).toLowerCase())).length;
                           return (
                             <span className="rounded-full bg-black/30 px-2 py-0.5 text-xs font-semibold text-white/80">
                               {eliminated.size > 0 ? `${alive}/${p.teams.length} tilbage` : `${p.teams.length} hold`}
@@ -447,7 +449,7 @@ export default function SummaryPage() {
                         {p.teams.map((t) => {
                           const roi  = roiLabel(t.currentPoints, t.pricePaid);
                           const xRoi = t.pricePaid > 0 ? (t.mean / t.pricePaid).toFixed(1) + "x" : null;
-                          const out = eliminated.has((findWC2026Team(t.name)?.name ?? t.name).toLowerCase());
+                          const out = eliminated.has((tournament.findTeam(t.name)?.name ?? t.name).toLowerCase());
                           return (
                             <li key={t.name} className="py-0.5">
                               {/* Linje 1: hold + faktiske tal */}

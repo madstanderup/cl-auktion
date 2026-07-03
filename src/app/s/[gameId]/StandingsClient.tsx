@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { Loader2, Trophy } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { findWC2026Team } from "@/lib/wc2026-teams";
-import { calcTeamPoints, teamMatchPoints, type ScoreMatch } from "@/lib/scoring";
+import { type ScoreMatch } from "@/lib/scoring";
+import { getTournamentForGame, calcPointsForTournament, matchPointsForTournament } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
 type MatchRow = ScoreMatch & { match_date: string | null };
@@ -27,6 +27,8 @@ export default function StandingsClient({ gameId }: { gameId: string }) {
 
   async function load() {
     setLoading(true);
+    const cfg = await getTournamentForGame(gameId);
+    const findTeam = cfg.findTeam;
     const [gameRes, playersRes, gtRes, teamsRes, matchesRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("players").select("id, name").eq("game_id", gameId),
@@ -60,9 +62,9 @@ export default function StandingsClient({ gameId }: { gameId: string }) {
       const pid = String(gt.owner_player_id);
       const tname = teamNameById.get(String(gt.team_id));
       if (!tname) continue;
-      pointsByPlayer.set(pid, (pointsByPlayer.get(pid) ?? 0) + calcTeamPoints(tname, matches));
+      pointsByPlayer.set(pid, (pointsByPlayer.get(pid) ?? 0) + calcPointsForTournament(cfg, tname, matches));
       teamsByPlayer.set(pid, (teamsByPlayer.get(pid) ?? 0) + 1);
-      const canon = (findWC2026Team(tname)?.name ?? tname).toLowerCase();
+      const canon = (findTeam(tname)?.name ?? tname).toLowerCase();
       const owner = playerNameById.get(pid);
       if (owner) ownerByTeam.set(canon, owner);
     }
@@ -79,7 +81,7 @@ export default function StandingsClient({ gameId }: { gameId: string }) {
       const latestKey = finished.map((m) => dayKey(m.match_date as string)).sort().at(-1)!;
       const dayMatches = finished.filter((m) => dayKey(m.match_date as string) === latestKey);
 
-      const flag = (n: string) => findWC2026Team(n)?.flag ?? "🏳";
+      const flag = (n: string) => findTeam(n)?.flag ?? "🏳";
       setResults(dayMatches.map((m) => ({
         home: m.home_team, away: m.away_team, homeFlag: flag(m.home_team), awayFlag: flag(m.away_team),
         hs: m.home_score ?? 0, as: m.away_score ?? 0,
@@ -88,9 +90,9 @@ export default function StandingsClient({ gameId }: { gameId: string }) {
 
       const dayPts = new Map<string, number>();
       for (const m of dayMatches) {
-        const hOwner = ownerByTeam.get((findWC2026Team(m.home_team)?.name ?? m.home_team).toLowerCase());
-        const aOwner = ownerByTeam.get((findWC2026Team(m.away_team)?.name ?? m.away_team).toLowerCase());
-        const hp = teamMatchPoints(m, true), ap = teamMatchPoints(m, false);
+        const hOwner = ownerByTeam.get((findTeam(m.home_team)?.name ?? m.home_team).toLowerCase());
+        const aOwner = ownerByTeam.get((findTeam(m.away_team)?.name ?? m.away_team).toLowerCase());
+        const hp = matchPointsForTournament(cfg, m, true, matches), ap = matchPointsForTournament(cfg, m, false, matches);
         if (hOwner && hp > 0) dayPts.set(hOwner, (dayPts.get(hOwner) ?? 0) + hp);
         if (aOwner && ap > 0) dayPts.set(aOwner, (dayPts.get(aOwner) ?? 0) + ap);
       }

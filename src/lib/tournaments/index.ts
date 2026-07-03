@@ -1,8 +1,9 @@
 import { supabase } from "@/lib/supabase";
-import { calcTeamPoints, type ScoreMatch } from "@/lib/scoring";
+import { calcTeamPoints, teamMatchPoints, groupQualBonus, type ScoreMatch } from "@/lib/scoring";
+import { computeEliminatedTeams } from "@/lib/tournament";
 import { WC2026 } from "./wc2026";
 import { CL2627 } from "./cl2627";
-import { clCalcTeamPoints } from "./cl-scoring";
+import { clCalcTeamPoints, clTeamMatchPoints, clComputeEliminated, clLeagueTop8, CL_TOP8_BONUS } from "./cl-scoring";
 import type { TournamentConfig, TournamentId } from "./types";
 
 export type { TournamentConfig, TournamentId, TournamentTeam, ScoringRules, StageDef } from "./types";
@@ -28,6 +29,40 @@ export const AVAILABLE_TOURNAMENTS: { id: TournamentId; label: string; available
 export function calcPointsForTournament(config: TournamentConfig, teamName: string, matches: ScoreMatch[]): number {
   if (config.id === "cl2627") return clCalcTeamPoints(teamName, matches);
   return calcTeamPoints(teamName, matches, config.scoring);
+}
+
+/** Point for ét hold i én kamp (til pr.-kamp-visning). */
+export function matchPointsForTournament(config: TournamentConfig, m: ScoreMatch, isHome: boolean, allMatches: ScoreMatch[]): number {
+  if (config.id === "cl2627") return clTeamMatchPoints(m, isHome, allMatches);
+  return teamMatchPoints(m, isHome, config.scoring);
+}
+
+/** Udryddede hold (kanoniske navne, lowercase). */
+export function eliminatedForTournament(config: TournamentConfig, matches: ScoreMatch[]): Set<string> {
+  if (config.id === "cl2627") return clComputeEliminated(matches);
+  return computeEliminatedTeams(matches);
+}
+
+/** Antal hold i live blandt en liste af (rå) holdnavne. */
+export function countAliveForTournament(config: TournamentConfig, teamNames: string[], eliminated: Set<string>): number {
+  return teamNames.reduce((n, t) => {
+    const canon = (config.findTeam(t)?.name ?? t).toLowerCase();
+    return n + (eliminated.has(canon) ? 0 : 1);
+  }, 0);
+}
+
+/** Kvalifikations-bonus for at gå videre fra gruppe-/ligafasen. */
+export function leagueQualBonusForTournament(config: TournamentConfig, teamName: string, matches: ScoreMatch[]): number {
+  if (config.id === "cl2627") {
+    const canon = (config.findTeam(teamName)?.name ?? teamName).toLowerCase();
+    return clLeagueTop8(matches).has(canon) ? CL_TOP8_BONUS : 0;
+  }
+  return groupQualBonus(teamName, matches, config.scoring);
+}
+
+/** stage-key → label for turneringen. */
+export function stageLabels(config: TournamentConfig): Record<string, string> {
+  return Object.fromEntries(config.stages.map((s) => [s.key, s.label]));
 }
 
 /** Slår en turnering op; ukendte/gamle spil falder tilbage til VM 2026. */

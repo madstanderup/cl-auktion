@@ -18,7 +18,7 @@ import { supabase } from "@/lib/supabase";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatStake } from "@/lib/side-bets";
-import { AVAILABLE_TOURNAMENTS } from "@/lib/tournaments";
+import { AVAILABLE_TOURNAMENTS, getTournament, getTournamentForGame, type TournamentConfig } from "@/lib/tournaments";
 
 type AuctionState = {
   current_team_name: string | null;
@@ -49,6 +49,8 @@ type MatchRow = {
 
 const STAGE_LABELS: Record<string, string> = {
   group:         "Gruppespil",
+  league:        "Ligafase",
+  playoff:       "Playoff (1/16)",
   round_of_32:   "1/16-finale",
   round_of_16:   "1/8-finale",
   quarter_final: "Kvartfinale",
@@ -136,6 +138,7 @@ export default function AuctionAdminPage() {
   const [newMatchHome, setNewMatchHome] = useState("");
   const [newMatchAway, setNewMatchAway] = useState("");
   const [newMatchStage, setNewMatchStage] = useState("group");
+  const [gameTournament, setGameTournament] = useState<TournamentConfig>(() => getTournament("wc2026"));
   const [matchAddLoading, setMatchAddLoading] = useState(false);
   // Per-kamp resultat-form state: matchId → {homeScore, awayScore, resultType}
   const [resultForms, setResultForms] = useState<Record<string, { home: string; away: string; type: string }>>({});
@@ -343,6 +346,10 @@ export default function AuctionAdminPage() {
 
   useEffect(() => {
     if (!sessionReady || !session) return;
+    void getTournamentForGame(session.gameId).then((cfg) => {
+      setGameTournament(cfg);
+      setNewMatchStage(cfg.stages[0].key);
+    });
     void loadState(session.gameId);
     void loadPlayers(session.gameId);
     void loadMatches(session.gameId);
@@ -1179,8 +1186,8 @@ export default function AuctionAdminPage() {
                 onChange={(e) => setNewMatchStage(e.target.value)}
                 className="mt-1 w-full rounded-md border border-white/15 bg-white/[0.06] px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-amber-400"
               >
-                {Object.entries(STAGE_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
+                {gameTournament.stages.map((st) => (
+                  <option key={st.key} value={st.key}>{STAGE_LABELS[st.key] ?? st.label}</option>
                 ))}
               </select>
             </div>
@@ -1208,7 +1215,7 @@ export default function AuctionAdminPage() {
               matches.map((m) => {
                 const form = resultForms[m.id] ?? { home: "", away: "", type: "normal_time" };
                 const isFinished = m.status === "finished";
-                const isKnockout = m.stage !== "group";
+                const isKnockout = m.stage !== "group" && m.stage !== "league";
                 return (
                   <div key={m.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
                     <div className="flex items-start justify-between gap-2">

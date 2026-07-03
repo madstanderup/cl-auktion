@@ -4,26 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, MapPin, Trophy, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { findWC2026Team } from "@/lib/wc2026-teams";
 import { cn } from "@/lib/utils";
+import { getTournament, getTournamentForGame, matchPointsForTournament, stageLabels, type TournamentConfig } from "@/lib/tournaments";
+import type { ScoreMatch } from "@/lib/scoring";
 
 const STAGE_LABELS: Record<string, string> = {
   group:         "Gruppe",
+  league:        "Liga",
+  playoff:       "Playoff",
   round_of_32:   "1/16-finale",
   round_of_16:   "1/8-finale",
   quarter_final: "Kvartfinale",
   semi_final:    "Semifinale",
   final:         "Finale",
-};
-
-// Kvalifikations-bonus tildelt ved SEJR i runden (kvalificerer til næste
-// runde; finale-sejr = verdensmester-bonus).
-const QUAL_ON_WIN: Record<string, number> = {
-  round_of_32:   100,
-  round_of_16:   200,
-  quarter_final: 200,
-  semi_final:    200,
-  final:         200,
 };
 
 type Goal = { minute: number; team: "home" | "away"; scorer: string };
@@ -63,33 +56,13 @@ const DA_DAYS = ["Søn", "Man", "Tirs", "Ons", "Tors", "Fre", "Lør"];
 function formatDayLabel(d: Date) { return `${DA_DAYS[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; }
 function formatTime(d: Date) { return d.toLocaleTimeString("da-DK", { hour: "2-digit", minute: "2-digit" }); }
 
-function calcMatchPoints(match: Match, isHome: boolean): number {
-  if (match.status !== "finished" || match.homeScore === null || match.awayScore === null) return 0;
-  const myScore  = isHome ? match.homeScore : match.awayScore;
-  const oppScore = isHome ? match.awayScore : match.homeScore;
-  let won = myScore > oppScore;
-  if (match.resultType === "penalties" && match.winnerSide) {
-    won = (isHome && match.winnerSide === "home") || (!isHome && match.winnerSide === "away");
-  }
-  const isET = match.resultType === "extra_time" || match.resultType === "penalties";
-  if (match.stage === "group") {
-    return myScore === oppScore ? 50 : won ? 150 : 0;
-  }
-  let pts = 0;
-  if (isET) { pts += 50; if (won) pts += 50; } else if (won) pts += 150;
-  if (won) pts += QUAL_ON_WIN[match.stage] ?? 0; // kvalifikation til næste runde
-  return pts;
-}
-
-function calcDayScores(matches: Match[]): { owner: string; pts: number }[] {
-  const totals = new Map<string, number>();
-  for (const m of matches) {
-    if (m.status !== "finished") continue;
-    const hp = calcMatchPoints(m, true), ap = calcMatchPoints(m, false);
-    if (m.homeOwner && hp > 0) totals.set(m.homeOwner, (totals.get(m.homeOwner) ?? 0) + hp);
-    if (m.awayOwner && ap > 0) totals.set(m.awayOwner, (totals.get(m.awayOwner) ?? 0) + ap);
-  }
-  return [...totals.entries()].map(([owner, pts]) => ({ owner, pts })).sort((a, b) => b.pts - a.pts);
+/** Kamp i ScoreMatch-form (til point-motoren). */
+function toScore(m: Match): ScoreMatch {
+  return {
+    home_team: m.homeTeam, away_team: m.awayTeam, stage: m.stage,
+    home_score: m.homeScore, away_score: m.awayScore,
+    result_type: m.resultType, winner_side: m.winnerSide, status: m.status,
+  };
 }
 
 function LineupSide({ match, side }: { match: Match; side: "home" | "away" }) {
@@ -204,6 +177,7 @@ export default function MatchesPage() {
   const gameId = params.gameId as string;
 
   const [gameLabel, setGameLabel] = useState("");
+  const [tournament, setTournament] = useState<TournamentConfig>(() => getTournament("wc2026"));
   const [days, setDays] = useState<DayGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeDay, setActiveDay] = useState<string | null>(null);
@@ -220,6 +194,8 @@ export default function MatchesPage() {
 
   async function load() {
     setLoading(true);
+    const cfg = await getTournamentForGame(gameId);
+    setTournament(cfg);
     const [gameRes, matchesRes, gtRes, playersRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("wc_matches")
@@ -248,19 +224,19 @@ export default function MatchesPage() {
       const owner = ownerByTeamId.get(String(t.id)) ?? null;
       const raw = String(t.name);
       ownerByTeamName.set(raw.toLowerCase(), owner);
-      const canon = findWC2026Team(raw)?.name;
+      const canon = cfg.findTeam(raw)?.name;
       if (canon) ownerByTeamName.set(canon.toLowerCase(), owner);
     }
 
     const matches: Match[] = ((matchesRes.data ?? []) as Record<string, unknown>[]).map((m) => {
       const rawHome = String(m.home_team), rawAway = String(m.away_team);
-      const homeTeam = findWC2026Team(rawHome)?.name ?? rawHome;
-      const awayTeam = findWC2026Team(rawAway)?.name ?? rawAway;
+      const homeTeam = cfg.findTeam(rawHome)?.name ?? rawHome;
+      const awayTeam = cfg.findTeam(rawAway)?.name ?? rawAway;
       return {
         id:            String(m.id),
         homeTeam, awayTeam,
-        homeFlag:      findWC2026Team(homeTeam)?.flag ?? "🏳",
-        awayFlag:      findWC2026Team(awayTeam)?.flag ?? "🏳",
+        homeFlag:      cfg.findTeam(homeTeam)?.flag ?? "🏳",
+        awayFlag:      cfg.findTeam(awayTeam)?.flag ?? "🏳",
         homeOwner:     ownerByTeamName.get(homeTeam.toLowerCase()) ?? null,
         awayOwner:     ownerByTeamName.get(awayTeam.toLowerCase()) ?? null,
         matchDate:     m.match_date ? new Date(String(m.match_date)) : null,
@@ -301,7 +277,21 @@ export default function MatchesPage() {
   }
 
   const activeDayGroup = days.find((d) => d.dateKey === activeDay);
-  const dayScores = activeDayGroup ? calcDayScores(activeDayGroup.matches) : [];
+  const allScore: ScoreMatch[] = days.flatMap((d) => d.matches.map(toScore));
+  const labelMap = { ...STAGE_LABELS, ...stageLabels(tournament) };
+  const ptsFor = (match: Match, isHome: boolean) =>
+    matchPointsForTournament(tournament, toScore(match), isHome, allScore);
+  const dayScores = (() => {
+    if (!activeDayGroup) return [] as { owner: string; pts: number }[];
+    const totals = new Map<string, number>();
+    for (const m of activeDayGroup.matches) {
+      if (m.status !== "finished") continue;
+      const hp = ptsFor(m, true), ap = ptsFor(m, false);
+      if (m.homeOwner && hp > 0) totals.set(m.homeOwner, (totals.get(m.homeOwner) ?? 0) + hp);
+      if (m.awayOwner && ap > 0) totals.set(m.awayOwner, (totals.get(m.awayOwner) ?? 0) + ap);
+    }
+    return [...totals.entries()].map(([owner, pts]) => ({ owner, pts })).sort((a, b) => b.pts - a.pts);
+  })();
   const hasFinishedToday = activeDayGroup?.matches.some((m) => m.status === "finished") ?? false;
 
   return (
@@ -359,9 +349,9 @@ export default function MatchesPage() {
                   {activeDayGroup.matches.map((match) => {
                     const finished   = match.status === "finished";
                     const live       = match.status === "live";
-                    const stageLabel = STAGE_LABELS[match.stage] ?? match.stage;
-                    const homePts    = calcMatchPoints(match, true);
-                    const awayPts    = calcMatchPoints(match, false);
+                    const stageLabel = labelMap[match.stage] ?? match.stage;
+                    const homePts    = ptsFor(match, true);
+                    const awayPts    = ptsFor(match, false);
                     const homeGoals  = (match.goals ?? []).filter((g) => g.team === "home");
                     const awayGoals  = (match.goals ?? []).filter((g) => g.team === "away");
                     const homeRed    = (match.cards ?? []).filter((c) => c.team === "home" && c.color === "red");

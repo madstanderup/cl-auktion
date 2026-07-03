@@ -27,6 +27,7 @@ export const WC2026: TournamentConfig = {
     { key: "semi_final",    label: "1/2" },
     { key: "final",         label: "Finale" },
   ],
+  leagueRounds: 3,
   hasBracket: true,
   twoLeggedKnockout: false,
   syncSource: "zafronix-wc2026",

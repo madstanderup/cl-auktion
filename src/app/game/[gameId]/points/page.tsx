@@ -4,22 +4,10 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Check, Loader2, RefreshCw, Share2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { findWC2026Team } from "@/lib/wc2026-teams";
-import { groupQualBonus, calcTeamPoints } from "@/lib/scoring";
+import { calcTeamPoints } from "@/lib/scoring";
 import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
+import { getTournament, getTournamentForGame, matchPointsForTournament, leagueQualBonusForTournament, type TournamentConfig } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
-
-const KNOCKOUT_STAGES = [
-  { key: "round_of_32",   label: "1/16" },
-  { key: "round_of_16",   label: "1/8" },
-  { key: "quarter_final", label: "1/4" },
-  { key: "semi_final",    label: "1/2" },
-  { key: "final",         label: "Finale" },
-];
-// Kvalifikations-bonus tildelt ved SEJR i runden (finale-sejr = mester-bonus).
-const QUAL_ON_WIN: Record<string, number> = {
-  round_of_32: 100, round_of_16: 200, quarter_final: 200, semi_final: 200, final: 200,
-};
 
 type MatchRow = {
   home_team: string; away_team: string; stage: string;
@@ -40,30 +28,7 @@ type Row = {
   roi: number;
 };
 
-function wonLost(m: MatchRow, isHome: boolean): { won: boolean; lost: boolean; draw: boolean } {
-  if (m.result_type === "penalties" && m.winner_side) {
-    const won = (isHome && m.winner_side === "home") || (!isHome && m.winner_side === "away");
-    return { won, lost: !won, draw: false };
-  }
-  const hs = m.home_score ?? 0, as_ = m.away_score ?? 0;
-  const my = isHome ? hs : as_, op = isHome ? as_ : hs;
-  return { won: my > op, lost: my < op, draw: my === op };
-}
 
-function groupMatchPoints(m: MatchRow, isHome: boolean): number {
-  const { won, draw } = wonLost(m, isHome);
-  return draw ? 50 : won ? 150 : 0;
-}
-
-function knockoutMatchPoints(m: MatchRow, isHome: boolean): number {
-  const { won } = wonLost(m, isHome);
-  const isET = m.result_type === "extra_time" || m.result_type === "penalties";
-  let pts = 0;
-  if (isET) { pts += 50; if (won) pts += 50; }
-  else if (won) pts += 150;
-  if (won) pts += QUAL_ON_WIN[m.stage] ?? 0; // kvalifikation til næste runde
-  return pts;
-}
 
 export default function PointsPage() {
   const params = useParams();
@@ -71,6 +36,7 @@ export default function PointsPage() {
   const gameId = params.gameId as string;
 
   const [rows, setRows] = useState<Row[]>([]);
+  const [tournament, setTournament] = useState<TournamentConfig>(() => getTournament("wc2026"));
   const [gameLabel, setGameLabel] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [shareDone, setShareDone] = useState(false);
@@ -80,6 +46,8 @@ export default function PointsPage() {
 
   async function load() {
     setLoading(true);
+    const cfg = await getTournamentForGame(gameId);
+    setTournament(cfg);
 
     const [gameRes, gtRes, teamsRes, playersRes, matchesRes, bidsRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
@@ -120,29 +88,29 @@ export default function PointsPage() {
       if (!teamName) continue;
       const ownerId = gt.owner_player_id ? String(gt.owner_player_id) : null;
       const owner = ownerId ? (playerNameById.get(ownerId) ?? null) : null;
-      const canon = findWC2026Team(teamName)?.name ?? teamName;
+      const canon = cfg.findTeam(teamName)?.name ?? teamName;
 
       const teamMatches = matches.filter((m) => m.home_team === canon || m.away_team === canon);
 
       // Gruppekampe i datorækkefølge → 3 kolonner
       const groupMs = teamMatches
-        .filter((m) => m.stage === "group")
+        .filter((m) => m.stage === cfg.stages[0].key)
         .sort((a, b) => (a.match_date ?? "").localeCompare(b.match_date ?? ""));
-      const group: (number | null)[] = [0, 1, 2].map((i) => {
+      const group: (number | null)[] = Array.from({ length: cfg.leagueRounds }, (_, i) => {
         const m = groupMs[i];
         if (!m || m.status !== "finished") return null;
-        return groupMatchPoints(m, m.home_team === canon);
+        return matchPointsForTournament(cfg, m, m.home_team === canon, matches);
       });
-      // Kvalifikation til 1/16 (+100): tildeles efter 3. gruppekamp (når hele
-      // gruppespillet er slut og holdet er gået videre)
-      const qual = groupQualBonus(teamName, matches);
-      if (qual > 0 && group[2] !== null) group[2] = (group[2] ?? 0) + qual;
+      // Kvalifikation videre fra gruppe-/ligafasen: tildeles efter sidste kamp
+      const qual = leagueQualBonusForTournament(cfg, teamName, matches);
+      const lastIdx = cfg.leagueRounds - 1;
+      if (qual > 0 && group[lastIdx] !== null) group[lastIdx] = (group[lastIdx] ?? 0) + qual;
 
-      // Knockout-runder
-      const knockout: (number | null)[] = KNOCKOUT_STAGES.map((s) => {
-        const m = teamMatches.find((mm) => mm.stage === s.key);
-        if (!m || m.status !== "finished") return null;
-        return knockoutMatchPoints(m, m.home_team === canon);
+      // Knockout-runder (dobbeltopgør summeres i én celle)
+      const knockout: (number | null)[] = cfg.stages.slice(1).map((s) => {
+        const legs = teamMatches.filter((mm) => mm.stage === s.key && mm.status === "finished");
+        if (legs.length === 0) return null;
+        return legs.reduce((sum, m) => sum + matchPointsForTournament(cfg, m, m.home_team === canon, matches), 0);
       });
 
       const total = [...group, ...knockout].reduce((s: number, v) => s + (v ?? 0), 0);
@@ -155,7 +123,7 @@ export default function PointsPage() {
       built.push({
         drawOrder: 0,
         teamName,
-        flag: findWC2026Team(teamName)?.flag ?? "🏳",
+        flag: cfg.findTeam(teamName)?.flag ?? "🏳",
         owner,
         group,
         knockout,
@@ -192,7 +160,7 @@ export default function PointsPage() {
           const pid = gt.owner_player_id ? String(gt.owner_player_id) : null;
           if (!tn || !pid) continue;
           (ownedByPlayer.get(pid) ?? ownedByPlayer.set(pid, []).get(pid)!).push(tn);
-          ownerByTeam.set((findWC2026Team(tn)?.name ?? tn).toLowerCase(), pid);
+          ownerByTeam.set((cfg.findTeam(tn)?.name ?? tn).toLowerCase(), pid);
         }
         const playerIds = [...ownedByPlayer.keys()];
         if (playerIds.length === 0) return;
@@ -229,7 +197,10 @@ export default function PointsPage() {
     }
   }
 
-  const COLS = ["1. runde", "2. runde", "3. runde", ...KNOCKOUT_STAGES.map((s) => s.label)];
+  const COLS = [
+    ...Array.from({ length: tournament.leagueRounds }, (_, i) => `${i + 1}. runde`),
+    ...tournament.stages.slice(1).map((s) => s.label),
+  ];
 
   function cell(v: number | null) {
     if (v === null) return <span className="text-slate-700">·</span>;

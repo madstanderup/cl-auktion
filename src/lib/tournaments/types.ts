@@ -41,6 +41,8 @@ export type TournamentConfig = {
   scoring: ScoringRules;
   /** Runder i rækkefølge, inkl. gruppe-/ligafase som første. */
   stages: StageDef[];
+  /** Antal kampe pr. hold i gruppe-/ligafasen. */
+  leagueRounds: number;
   /** Har turneringen bracket-features (bracket-side, bracket-sim)? */
   hasBracket: boolean;
   /** Spilles knockout-runder som dobbeltopgør? (CL: ja, undtagen finalen) */

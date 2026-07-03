@@ -118,6 +118,76 @@ export function clTieWinner(stage: string, teamA: string, teamB: string, matches
   return null; // sammenlagt uafgjort uden straffe-markering — uafklaret
 }
 
+/**
+ * Point for ét hold i én kamp (til visning pr. kamp).
+ * Playoff giver 0. Kval-bonus ved opgørssejr vises på det AFGØRENDE ben
+ * (2. ben / finalen), så dagens point stemmer med totalerne.
+ */
+export function clTeamMatchPoints(m: ScoreMatch, isHome: boolean, allMatches: ScoreMatch[]): number {
+  if (m.status !== "finished" || m.home_score === null || m.away_score === null) return 0;
+  if (m.stage === "league") {
+    const r = legWinner(m, isHome);
+    return r === "won" ? CL_LEAGUE_WIN : r === "draw" ? CL_LEAGUE_DRAW : 0;
+  }
+  const me = canonLower(isHome ? m.home_team : m.away_team);
+  const opp = isHome ? m.away_team : m.home_team;
+
+  let pts = 0;
+  if (m.stage !== "playoff") {
+    const isET = m.result_type === "extra_time" || m.result_type === "penalties";
+    const r = legWinner(m, isHome);
+    if (isET) { pts += CL_KO_DRAW; if (r === "won") pts += CL_ET_WIN; }
+    else pts += r === "won" ? CL_KO_WIN : r === "draw" ? CL_KO_DRAW : 0;
+  }
+
+  // Kval-bonus på det afgørende ben: kampen er "sidste" ben hvis opgøret er
+  // komplet og denne kamp er den senest afviklede i opgøret (eller finalen).
+  const legs = allMatches.filter((x) =>
+    x.stage === m.stage && x.status === "finished" &&
+    ((canonLower(x.home_team) === me && canonLower(x.away_team) === canonLower(opp)) ||
+     (canonLower(x.home_team) === canonLower(opp) && canonLower(x.away_team) === me)),
+  );
+  const needed = TWO_LEGGED.has(m.stage) ? 2 : 1;
+  if (legs.length >= needed && legs[legs.length - 1] === m) {
+    if (clTieWinner(m.stage, isHome ? m.home_team : m.away_team, opp, allMatches) === me) {
+      pts += CL_QUAL_ON_TIE_WIN[m.stage] ?? 0;
+    }
+  }
+  return pts;
+}
+
+/**
+ * Udryddede hold (kanoniske navne, lowercase) — hold der ikke kan score mere:
+ *  - nr. 25-36 i ligaen (når ligafasen er slut)
+ *  - tabere af afgjorte opgør (playoff → semi)
+ *  - begge finalister når finalen er spillet
+ */
+export function clComputeEliminated(matches: ScoreMatch[]): Set<string> {
+  const elim = new Set<string>();
+
+  if (isLeagueComplete(matches)) {
+    for (const r of clLeagueTable(matches).slice(24)) elim.add(r.name);
+  }
+
+  for (const stage of ["playoff", "round_of_16", "quarter_final", "semi_final", "final"]) {
+    // Find alle par i runden
+    const pairs = new Map<string, [string, string]>();
+    for (const m of matches) {
+      if (m.stage !== stage || m.status !== "finished") continue;
+      const a = canonLower(m.home_team), b = canonLower(m.away_team);
+      pairs.set([a, b].sort().join("|"), [m.home_team, m.away_team]);
+    }
+    for (const [A, B] of pairs.values()) {
+      const w = clTieWinner(stage, A, B, matches);
+      if (!w) continue;
+      const loser = w === canonLower(A) ? canonLower(B) : canonLower(A);
+      elim.add(loser);
+      if (stage === "final") elim.add(w); // turneringen er slut
+    }
+  }
+  return elim;
+}
+
 /** Samlede CL-point for et hold ud fra alle kampe. */
 export function clCalcTeamPoints(teamName: string, matches: ScoreMatch[]): number {
   const me = canonLower(teamName);

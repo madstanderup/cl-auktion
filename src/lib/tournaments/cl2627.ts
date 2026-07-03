@@ -31,6 +31,7 @@ export const CL2627: TournamentConfig = {
     { key: "semi_final",    label: "1/2" },
     { key: "final",         label: "Finale" },
   ],
+  leagueRounds: 8,
   hasBracket: false, // CL-bracket bygges senere (playoff-seedning afhænger af ligaplaceringer)
   twoLeggedKnockout: true,
   syncSource: "none", // Zafronix /uefa/championsleague findes — adapter kobles på når 26/27-data publiceres

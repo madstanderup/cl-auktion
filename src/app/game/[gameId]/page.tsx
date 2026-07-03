@@ -10,9 +10,7 @@ import {
   PLAYER_GAME_ID_KEY,
   PLAYER_ID_KEY,
 } from "@/lib/player-storage";
-import { findWC2026Team } from "@/lib/wc2026-teams";
-import { computeEliminatedTeams, countAlive } from "@/lib/tournament";
-import { calcTeamPoints, teamMatchPoints } from "@/lib/scoring";
+import { getTournament, getTournamentForGame, calcPointsForTournament, matchPointsForTournament, eliminatedForTournament, countAliveForTournament, type TournamentConfig } from "@/lib/tournaments";
 import { SideBetOffer } from "@/components/side-bet-offer";
 
 type Player = { id: string; name: string; coins: number; points: number };
@@ -47,6 +45,7 @@ export default function GamePage() {
   const gameId = params.gameId as string;
 
   const [gameLabel, setGameLabel] = useState<string>("");
+  const [tournament, setTournament] = useState<TournamentConfig>(() => getTournament("wc2026"));
   const [shareDone, setShareDone] = useState(false);
   const [matchRows, setMatchRows] = useState<MatchRow[]>([]);
   const [ownerByTeam, setOwnerByTeam] = useState<Map<string, string>>(new Map());
@@ -64,6 +63,8 @@ export default function GamePage() {
 
   async function load() {
     setLoading(true);
+    const cfg = await getTournamentForGame(gameId);
+    setTournament(cfg);
 
     let myPlayerId: string | null = null;
     try { myPlayerId = localStorage.getItem(PLAYER_ID_KEY); } catch { /* ignore */ }
@@ -135,9 +136,9 @@ export default function GamePage() {
       const tname = teamNameById.get(String(row.team_id));
       if (!tname) continue;
       const arr = teamsByOwner.get(pid) ?? [];
-      arr.push({ name: tname, points: calcTeamPoints(tname, matches), pricePaid: winnerBidByTeam.get(`${pid}|${tname}`) ?? 0 });
+      arr.push({ name: tname, points: calcPointsForTournament(cfg, tname, matches), pricePaid: winnerBidByTeam.get(`${pid}|${tname}`) ?? 0 });
       teamsByOwner.set(pid, arr);
-      const canon = (findWC2026Team(tname)?.name ?? tname).toLowerCase();
+      const canon = (cfg.findTeam(tname)?.name ?? tname).toLowerCase();
       const ownerName = playerNameById.get(pid);
       if (ownerName) ownerMap.set(canon, ownerName);
     }
@@ -166,10 +167,10 @@ export default function GamePage() {
   );
 
   // Hold tilbage pr. spiller (slåede hold trækkes fra)
-  const eliminated = computeEliminatedTeams(matchRows);
+  const eliminated = eliminatedForTournament(tournament, matchRows);
   const tournamentStarted = matchRows.some((m) => m.status === "finished");
   const aliveByPlayer = new Map<string, number>(
-    allPlayerTeams.map((pt) => [pt.player.id, countAlive(pt.teams.map((t) => t.name), eliminated)])
+    allPlayerTeams.map((pt) => [pt.player.id, countAliveForTournament(tournament, pt.teams.map((t) => t.name), eliminated)])
   );
 
   const MEDALS = ["🥇", "🥈", "🥉"];
@@ -188,7 +189,7 @@ export default function GamePage() {
     const dayMatches = finished.filter((m) => dayKey(m.match_date as string) === latestKey);
     if (dayMatches.length === 0) return "";
 
-    const flag = (name: string) => findWC2026Team(name)?.flag ?? "";
+    const flag = (name: string) => tournament.findTeam(name)?.flag ?? "";
     const resultLines = dayMatches.map((m) => {
       const et = m.result_type === "penalties" ? " (e.s.)" : m.result_type === "extra_time" ? " (e.f.)" : "";
       return `${flag(m.home_team)} ${m.home_team} ${m.home_score}–${m.away_score} ${m.away_team} ${flag(m.away_team)}${et}`.trim();
@@ -197,10 +198,10 @@ export default function GamePage() {
     // Dagens topscorer (sum point pr. ejer fra dagens kampe)
     const dayPts = new Map<string, number>();
     for (const m of dayMatches) {
-      const hOwner = ownerByTeam.get((findWC2026Team(m.home_team)?.name ?? m.home_team).toLowerCase());
-      const aOwner = ownerByTeam.get((findWC2026Team(m.away_team)?.name ?? m.away_team).toLowerCase());
-      const hp = teamMatchPoints(m, true);
-      const ap = teamMatchPoints(m, false);
+      const hOwner = ownerByTeam.get((tournament.findTeam(m.home_team)?.name ?? m.home_team).toLowerCase());
+      const aOwner = ownerByTeam.get((tournament.findTeam(m.away_team)?.name ?? m.away_team).toLowerCase());
+      const hp = matchPointsForTournament(tournament, m, true, matchRows);
+      const ap = matchPointsForTournament(tournament, m, false, matchRows);
       if (hOwner && hp > 0) dayPts.set(hOwner, (dayPts.get(hOwner) ?? 0) + hp);
       if (aOwner && ap > 0) dayPts.set(aOwner, (dayPts.get(aOwner) ?? 0) + ap);
     }

@@ -6,6 +6,7 @@ import { ArrowLeft, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { findWC2026Team } from "@/lib/wc2026-teams";
 import { canBuildBracket, buildFullBracket, type BracketMatch } from "@/lib/bracket";
+import { getTournamentForGame } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
 type MatchRow = {
@@ -32,6 +33,8 @@ export default function BracketPage() {
 
   async function load() {
     setLoading(true);
+    const cfg = await getTournamentForGame(gameId);
+    if (!cfg.hasBracket) { setAvailable(false); setLoading(false); return; }
     const [gameRes, gtRes, teamsRes, playersRes, matchesRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("game_teams").select("team_id, owner_player_id").eq("game_id", gameId).not("owner_player_id", "is", null),

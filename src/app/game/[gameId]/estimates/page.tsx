@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { findWC2026Team } from "@/lib/wc2026-teams";
-import { computeEliminatedTeams, type TMatch } from "@/lib/tournament";
+import { type TMatch } from "@/lib/tournament";
 import { canBuildBracket, simulateTeamPoints, buildStrengthMap } from "@/lib/bracket";
-import { calcTeamPoints } from "@/lib/standings";
+import { getTournamentForGame, calcPointsForTournament, eliminatedForTournament } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
 const OWNER_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
@@ -28,6 +27,7 @@ export default function EstimatesPage() {
 
   async function load() {
     setLoading(true);
+    const cfg = await getTournamentForGame(gameId);
     const [gameRes, gtRes, teamsRes, playersRes, matchesRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
       supabase.from("game_teams").select("team_id, owner_player_id").eq("game_id", gameId).not("owner_player_id", "is", null),
@@ -53,8 +53,8 @@ export default function EstimatesPage() {
       status: String(m.status),
     })) as TMatch[];
 
-    const norm = (n: string) => (findWC2026Team(n)?.name ?? n).toLowerCase();
-    const eliminated = computeEliminatedTeams(matches);
+    const norm = (n: string) => (cfg.findTeam(n)?.name ?? n).toLowerCase();
+    const eliminated = eliminatedForTournament(cfg, matches);
 
     // Ejede hold + nuværende point
     const owned: { canon: string; raw: string; owner: string | null }[] = [];
@@ -64,17 +64,17 @@ export default function EstimatesPage() {
       if (!raw) continue;
       const canon = norm(raw);
       owned.push({ canon, raw, owner: playerNameById.get(String(gt.owner_player_id)) ?? null });
-      currentByTeam.set(canon, calcTeamPoints(raw, matches));
+      currentByTeam.set(canon, calcPointsForTournament(cfg, raw, matches));
     }
 
-    const useBracket = canBuildBracket(matches);
+    const useBracket = cfg.hasBracket && canBuildBracket(matches);
     setBracketBased(useBracket);
     const est = useBracket
       ? simulateTeamPoints(matches, { strength: buildStrengthMap(), currentByTeam, N: 30000 })
       : new Map<string, number>();
 
     const built: Row[] = owned.map(({ canon, raw, owner }) => {
-      const wc = findWC2026Team(raw);
+      const wc = cfg.findTeam(raw);
       const cur = currentByTeam.get(canon) ?? 0;
       const startEst = wc?.mean ?? 0;
       const estVal = useBracket ? (est.get(canon) ?? cur) : startEst;

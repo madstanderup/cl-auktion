@@ -10,7 +10,6 @@ import {
   PLAYER_GAME_ID_KEY,
   type GameAdminSession,
 } from "@/lib/player-storage";
-import { LiveMatchTicker } from "@/components/live-match-ticker";
 import { SideBetInbox } from "@/components/side-bet-inbox";
 import { GameNav } from "@/components/game-nav";
 import { ScoringUpdateModal } from "@/components/scoring-update-modal";
@@ -90,7 +89,6 @@ export default function GameLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <>
-      <LiveMatchTicker gameId={gameId} />
       <GameNav gameId={gameId} />
       <SideBetInbox gameId={gameId} />
       <ScoringUpdateModal />

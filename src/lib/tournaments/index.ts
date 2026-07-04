@@ -70,20 +70,48 @@ export function getTournament(id: string | null | undefined): TournamentConfig {
 }
 
 /**
+ * Cache af turnering pr. spil. Turneringstypen for et spil ændrer sig aldrig,
+ * så vi henter den kun én gang. `inflight` sikrer at samtidige kald (side, nav,
+ * sidebet-inbox m.fl. på samme render) deler ét enkelt databasekald i stedet
+ * for at fyre 3-4 identiske forespørgsler af sted.
+ */
+const tournamentCache = new Map<string, TournamentConfig>();
+const inflight = new Map<string, Promise<TournamentConfig>>();
+
+/**
  * Henter turneringen for et spil via games.tournament_type.
  * Falder tilbage til VM 2026 hvis kolonnen mangler (migration ikke kørt)
- * eller spillet ikke findes.
+ * eller spillet ikke findes. Resultatet caches pr. spil.
  */
 export async function getTournamentForGame(gameId: string): Promise<TournamentConfig> {
-  try {
-    const { data, error } = await supabase
-      .from("games")
-      .select("tournament_type")
-      .eq("id", gameId)
-      .maybeSingle();
-    if (error || !data) return WC2026;
-    return getTournament((data as { tournament_type?: string }).tournament_type);
-  } catch {
-    return WC2026;
-  }
+  const cached = tournamentCache.get(gameId);
+  if (cached) return cached;
+
+  const pending = inflight.get(gameId);
+  if (pending) return pending;
+
+  const promise = (async () => {
+    try {
+      const { data, error } = await supabase
+        .from("games")
+        .select("tournament_type")
+        .eq("id", gameId)
+        .maybeSingle();
+      const cfg =
+        error || !data
+          ? WC2026
+          : getTournament((data as { tournament_type?: string }).tournament_type);
+      tournamentCache.set(gameId, cfg);
+      return cfg;
+    } catch {
+      // Fald tilbage til VM 2026, men cache ikke fejlen — så et forbigående
+      // netværksudfald kan prøves igen ved næste kald.
+      return WC2026;
+    } finally {
+      inflight.delete(gameId);
+    }
+  })();
+
+  inflight.set(gameId, promise);
+  return promise;
 }

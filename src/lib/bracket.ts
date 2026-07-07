@@ -200,6 +200,8 @@ export type BracketSimResult = {
   winProb: Record<string, number>;
   pairwise: Record<string, Record<string, number>>;
   expectedPoints: Record<string, number>;
+  /** placeProb[playerId][r] = sandsynlighed for at slutte på placering r+1. */
+  placeProb: Record<string, number[]>;
 };
 
 /**
@@ -231,7 +233,9 @@ export function simulateBracket(
   const wins: Record<string, number> = {};
   const sum: Record<string, number> = {};
   const beats: Record<string, Record<string, number>> = {};
-  for (const a of playerIds) { wins[a] = 0; sum[a] = 0; beats[a] = {}; for (const b of playerIds) beats[a][b] = 0; }
+  const placeCounts: Record<string, number[]> = {};
+  const rankIds = [...playerIds];
+  for (const a of playerIds) { wins[a] = 0; sum[a] = 0; beats[a] = {}; placeCounts[a] = new Array(playerIds.length).fill(0); for (const b of playerIds) beats[a][b] = 0; }
 
   for (let it = 0; it < N; it++) {
     const winners = new Map<number, string>();
@@ -263,11 +267,14 @@ export function simulateBracket(
     }
     if (bestId) wins[bestId]++;
     for (const a of playerIds) for (const b of playerIds) if (a !== b && totals[a] > totals[b]) beats[a][b]++;
+    rankIds.sort((a, b) => totals[b] - totals[a]);
+    for (let r = 0; r < rankIds.length; r++) placeCounts[rankIds[r]][r]++;
   }
 
   const winProb = Object.fromEntries(playerIds.map((id) => [id, wins[id] / N]));
   const expectedPoints = Object.fromEntries(playerIds.map((id) => [id, sum[id] / N]));
   const pairwise: Record<string, Record<string, number>> = {};
   for (const a of playerIds) { pairwise[a] = {}; for (const b of playerIds) pairwise[a][b] = beats[a][b] / N; }
-  return { winProb, pairwise, expectedPoints };
+  const placeProb = Object.fromEntries(playerIds.map((id) => [id, placeCounts[id].map((c) => c / N)]));
+  return { winProb, pairwise, expectedPoints, placeProb };
 }

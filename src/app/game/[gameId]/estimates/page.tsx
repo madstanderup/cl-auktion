@@ -6,12 +6,15 @@ import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { type TMatch } from "@/lib/tournament";
 import { canBuildBracket, simulateTeamPoints, buildStrengthMap } from "@/lib/bracket";
+import { simulateClTeamPoints } from "@/lib/tournaments/cl-sim";
+import { colorByPlayerName } from "@/lib/player-colors";
 import { getTournamentForGame, calcPointsForTournament, eliminatedForTournament } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
-const OWNER_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
-
 type Row = { name: string; flag: string; owner: string | null; color?: string; current: number; est: number; startEst: number; out: boolean };
+
+/** Hvordan "Est. nu" er beregnet: WC-bracket-sim, CL-turnerings-sim eller før-turnerings-forventning. */
+type EstMode = "bracket" | "clsim" | "pre";
 
 export default function EstimatesPage() {
   const params = useParams();
@@ -21,7 +24,7 @@ export default function EstimatesPage() {
   const [loading, setLoading] = useState(true);
   const [gameLabel, setGameLabel] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
-  const [bracketBased, setBracketBased] = useState(false);
+  const [estMode, setEstMode] = useState<EstMode>("pre");
 
   useEffect(() => { if (gameId) void load(); }, [gameId]);
 
@@ -41,8 +44,8 @@ export default function EstimatesPage() {
 
     const teamNameById = new Map(((teamsRes.data ?? []) as Record<string, unknown>[]).map((t) => [String(t.id), String(t.name)]));
     const playerNameById = new Map(((playersRes.data ?? []) as Record<string, unknown>[]).map((p) => [String(p.id), String(p.name)]));
-    const colorByOwner = new Map<string, string>();
-    [...new Set(playerNameById.values())].forEach((nm, i) => colorByOwner.set(nm, OWNER_COLORS[i % OWNER_COLORS.length]));
+    // Låst farve pr. spiller (samme tildeling som på de andre oversigter)
+    const colorByOwner = colorByPlayerName([...playerNameById.entries()].map(([id, name]) => ({ id, name })));
 
     const matches = ((matchesRes.data ?? []) as Record<string, unknown>[]).map((m) => ({
       home_team: String(m.home_team), away_team: String(m.away_team), stage: String(m.stage),
@@ -67,17 +70,19 @@ export default function EstimatesPage() {
       currentByTeam.set(canon, calcPointsForTournament(cfg, raw, matches));
     }
 
-    const useBracket = cfg.hasBracket && canBuildBracket(matches);
-    setBracketBased(useBracket);
-    const est = useBracket
+    const mode: EstMode = cfg.hasBracket && canBuildBracket(matches) ? "bracket" : cfg.id === "cl2627" ? "clsim" : "pre";
+    setEstMode(mode);
+    const est = mode === "bracket"
       ? simulateTeamPoints(matches, { strength: buildStrengthMap(), currentByTeam, N: 30000 })
-      : new Map<string, number>();
+      : mode === "clsim"
+        ? simulateClTeamPoints(matches, { currentByTeam, N: 10000 })
+        : new Map<string, number>();
 
     const built: Row[] = owned.map(({ canon, raw, owner }) => {
       const wc = cfg.findTeam(raw);
       const cur = currentByTeam.get(canon) ?? 0;
       const startEst = wc?.mean ?? 0;
-      const estVal = useBracket ? (est.get(canon) ?? cur) : startEst;
+      const estVal = mode !== "pre" ? (est.get(canon) ?? cur) : startEst;
       return {
         name: wc?.name ?? raw,
         flag: wc?.flag ?? "🏳",
@@ -127,12 +132,20 @@ export default function EstimatesPage() {
             {/* Forklaring */}
             <div className="mb-5 rounded-xl border border-white/10 bg-slate-950/60 p-4 text-xs leading-relaxed text-slate-400">
               <p className="mb-2 font-semibold text-slate-200">Sådan beregnes estimatet</p>
-              {bracketBased ? (
+              {estMode === "bracket" ? (
                 <p>
                   <span className="text-slate-300">Est.</span> = point holdet allerede har scoret + det gennemsnitlige
                   udbytte fra <span className="text-slate-300">30.000 simulerede gennemspilninger</span> af knockout-bracket'en.
                   Hver kamp afgøres ud fra holdenes styrke (forventede point), vinderen føres videre, og point tildeles efter
                   reglerne (sejr 150, avancement-bonus til taberen, finalevinder +1.000). Slåede hold er låst på deres nuværende point.
+                </p>
+              ) : estMode === "clsim" ? (
+                <p>
+                  <span className="text-slate-300">Est.</span> = point holdet allerede har scoret + det gennemsnitlige
+                  udbytte fra <span className="text-slate-300">10.000 simulerede gennemspilninger</span> af resten af
+                  turneringen (resterende ligakampe, playoff og knockout). Hver kamp afgøres med simulerede mål ud fra
+                  holdenes styrke, spillede kampe og afgjorte opgør er låst, og point tildeles efter reglerne
+                  (ligasejr 150, top 8 +100, knockout-sejre og kvalifikations-bonusser).
                 </p>
               ) : (
                 <p>Gruppespillet er ikke færdigt endnu — estimatet er holdets <span className="text-slate-300">før-turnerings-forventning</span>. Når gruppespillet er slut, skifter det til en fuld bracket-simulering.</p>

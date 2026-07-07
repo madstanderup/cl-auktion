@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { findWC2026Team } from "@/lib/wc2026-teams";
 import { canBuildBracket, buildFullBracket, type BracketMatch } from "@/lib/bracket";
 import { getTournamentForGame } from "@/lib/tournaments";
+import { colorByPlayerName } from "@/lib/player-colors";
 import { cn } from "@/lib/utils";
 
 type MatchRow = {
@@ -14,8 +15,6 @@ type MatchRow = {
   home_score: number | null; away_score: number | null;
   result_type: string | null; winner_side: string | null; status: string;
 };
-
-const OWNER_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
 
 export default function BracketPage() {
   const params = useParams();
@@ -57,9 +56,8 @@ export default function BracketPage() {
     }
     setOwnerByTeam(owner);
 
-    const colors = new Map<string, string>();
-    [...new Set([...playerNameById.values()])].forEach((nm, i) => colors.set(nm, OWNER_COLORS[i % OWNER_COLORS.length]));
-    setColorByOwner(colors);
+    // Låst farve pr. spiller (samme tildeling som på de andre oversigter)
+    setColorByOwner(colorByPlayerName([...playerNameById.entries()].map(([id, name]) => ({ id, name }))));
 
     const matches = ((matchesRes.data ?? []) as Record<string, unknown>[]).map((m) => ({
       home_team: String(m.home_team), away_team: String(m.away_team), stage: String(m.stage),

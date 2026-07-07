@@ -121,6 +121,8 @@ export type SimulationResult = {
   pairwise: Record<string, Record<string, number>>;
   /** Forventet slutpoint pr. spiller (gennemsnit af simulerede totaler). */
   expectedPoints: Record<string, number>;
+  /** placeProb[playerId][r] = sandsynlighed for at slutte på placering r+1. */
+  placeProb: Record<string, number[]>;
 };
 
 /**
@@ -141,6 +143,8 @@ export function simulateStandings(
     beats[a] = {};
     for (const b of ids) beats[a][b] = 0;
   }
+  const placeCounts = players.map(() => new Array<number>(players.length).fill(0));
+  const rankIdx = players.map((_, i) => i);
 
   const scores = new Array<number>(players.length);
 
@@ -165,6 +169,8 @@ export function simulateStandings(
         if (a !== b && scores[a] > scores[b]) beats[ids[a]][ids[b]]++;
       }
     }
+    rankIdx.sort((a, b) => scores[b] - scores[a]);
+    for (let r = 0; r < rankIdx.length; r++) placeCounts[rankIdx[r]][r]++;
   }
 
   const winProb = Object.fromEntries(ids.map((id) => [id, wins[id] / N]));
@@ -174,6 +180,7 @@ export function simulateStandings(
     pairwise[a] = {};
     for (const b of ids) pairwise[a][b] = beats[a][b] / N;
   }
+  const placeProb = Object.fromEntries(ids.map((id, i) => [id, placeCounts[i].map((c) => c / N)]));
 
-  return { winProb, pairwise, expectedPoints };
+  return { winProb, pairwise, expectedPoints, placeProb };
 }

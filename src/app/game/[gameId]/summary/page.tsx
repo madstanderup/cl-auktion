@@ -7,6 +7,8 @@ import { ArrowLeft, Loader2, Trophy, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { simulateStandings, type PlayerSim } from "@/lib/wc2026-teams";
 import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
+import { simulateClTournament } from "@/lib/tournaments/cl-sim";
+import { stableColorIndex, PLAYER_COLORS } from "@/lib/player-colors";
 import { getTournament, getTournamentForGame, calcPointsForTournament, eliminatedForTournament, type TournamentConfig } from "@/lib/tournaments";
 import { formatStake } from "@/lib/side-bets";
 import { cn } from "@/lib/utils";
@@ -102,6 +104,8 @@ export default function SummaryPage() {
   const [results, setResults] = useState<PlayerResult[]>([]);
   const [tournament, setTournament] = useState<TournamentConfig>(() => getTournament("wc2026"));
   const [pairwise, setPairwise] = useState<Record<string, Record<string, number>>>({});
+  const [placeProb, setPlaceProb] = useState<Record<string, number[]>>({});
+  const [colorIdx, setColorIdx] = useState<Map<string, number>>(new Map());
   const [history, setHistory] = useState<SnapshotRow[]>([]);
   const [eliminated, setEliminated] = useState<Set<string>>(new Set());
   const [sideBets, setSideBets] = useState<SideBetRow[]>([]);
@@ -188,6 +192,7 @@ export default function SummaryPage() {
     }
 
     const players = (playersRes.data ?? []) as { id: string; name: string; coins: number }[];
+    setColorIdx(stableColorIndex(players)); // låst farve pr. spiller, uafhængig af stillingen
 
     // Byg foreløbige resultater (uden win-prob endnu)
     const partial: Omit<PlayerResult, "winProb" | "expectedLive">[] = players.map((p) => {
@@ -234,6 +239,7 @@ export default function SummaryPage() {
     let winProbs: Record<string, number>;
     let pw: Record<string, Record<string, number>>;
     let expPts: Record<string, number>;
+    let pProb: Record<string, number[]>;
 
     if (cfg.hasBracket && canBuildBracket(allMatches)) {
       // Bracket-bevidst: simulér de faktiske knockout-kampe gennem træet
@@ -242,8 +248,18 @@ export default function SummaryPage() {
       const ownerByTeam = new Map<string, string>();
       for (const p of partial) for (const t of p.teams) ownerByTeam.set(normName(t.name), p.playerId);
       // Spillede knockout-kampe låses automatisk af simulateBracket
-      ({ winProb: winProbs, pairwise: pw, expectedPoints: expPts } = simulateBracket(allMatches, {
+      ({ winProb: winProbs, pairwise: pw, expectedPoints: expPts, placeProb: pProb } = simulateBracket(allMatches, {
         playerIds, basePoints, strength: buildStrengthMap(), ownerByTeam, N: 8000,
+      }));
+    } else if (cfg.id === "cl2627") {
+      // CL: fuld turnerings-Monte-Carlo fra første kamp — spillede kampe
+      // låses, resten (liga + playoff + knockout) simuleres
+      const playerIds = partial.map((p) => p.playerId);
+      const basePoints = new Map(partial.map((p) => [p.playerId, p.teams.reduce((s, t) => s + t.currentPoints, 0)]));
+      const ownerByTeam = new Map<string, string>();
+      for (const p of partial) for (const t of p.teams) ownerByTeam.set(normName(t.name), p.playerId);
+      ({ winProb: winProbs, pairwise: pw, expectedPoints: expPts, placeProb: pProb } = simulateClTournament(allMatches, {
+        playerIds, basePoints, ownerByTeam, N: 8000,
       }));
     } else {
       // Før gruppespillet er slut: uafhængig model (før-turnerings-fordeling + gulv)
@@ -255,11 +271,12 @@ export default function SummaryPage() {
             : { mean: t.mean, stdDev: t.stdDev, floor: t.currentPoints },
         ),
       }));
-      ({ winProb: winProbs, pairwise: pw, expectedPoints: expPts } = simulateStandings(sims, 8000));
+      ({ winProb: winProbs, pairwise: pw, expectedPoints: expPts, placeProb: pProb } = simulateStandings(sims, 8000));
     }
 
     setSimulating(false);
     setPairwise(pw);
+    setPlaceProb(pProb);
 
     const full: PlayerResult[] = partial.map((p) => ({
       ...p,
@@ -412,7 +429,7 @@ export default function SummaryPage() {
               "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4"
             )}>
               {sorted.map((p, idx) => {
-                const theme = PLAYER_THEMES[idx % PLAYER_THEMES.length];
+                const theme = PLAYER_THEMES[(colorIdx.get(p.playerId) ?? idx) % PLAYER_THEMES.length];
                 const pts = sortKey === "mean" ? p.totalMean : p.totalMedian;
 
                 return (
@@ -721,9 +738,7 @@ export default function SummaryPage() {
                   {[...results]
                     .sort((a, b) => b.winProb - a.winProb)
                     .map((p, idx) => {
-                      const theme = PLAYER_THEMES[
-                        sorted.findIndex((s) => s.playerId === p.playerId) % PLAYER_THEMES.length
-                      ];
+                      const theme = PLAYER_THEMES[(colorIdx.get(p.playerId) ?? idx) % PLAYER_THEMES.length];
                       return (
                         <div key={p.playerId} className={cn("rounded-lg border p-4", theme.border)}>
                           <div className="flex items-center justify-between mb-2">
@@ -758,7 +773,7 @@ export default function SummaryPage() {
               {(() => {
                 const dates = [...new Set(history.map((h) => h.snapshot_date))].sort();
                 if (dates.length < 2) return null;
-                const CHART_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
+                const CHART_COLORS = PLAYER_COLORS;
                 const order = [...results].sort((a, b) => b.winProb - a.winProb);
                 const W = 720, H = 250, padL = 38, padR = 12, padT = 12, padB = 28;
                 const plotW = W - padL - padR, plotH = H - padT - padB;
@@ -785,7 +800,7 @@ export default function SummaryPage() {
                         <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize={10} fill="#64748b">{fmt(dates[i])}</text>
                       ))}
                       {order.map((p, idx) => {
-                        const color = CHART_COLORS[idx % CHART_COLORS.length];
+                        const color = CHART_COLORS[(colorIdx.get(p.playerId) ?? idx) % CHART_COLORS.length];
                         const pts = dates
                           .map((d, i) => ({ i, v: byPlayerDate.get(`${p.playerId}|${d}`) }))
                           .filter((q) => q.v !== undefined) as { i: number; v: number }[];
@@ -802,7 +817,7 @@ export default function SummaryPage() {
                     <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
                       {order.map((p, idx) => (
                         <span key={p.playerId} className="flex items-center gap-1.5 text-xs text-slate-300">
-                          <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
+                          <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[(colorIdx.get(p.playerId) ?? idx) % CHART_COLORS.length] }} />
                           {p.playerName}
                         </span>
                       ))}
@@ -818,7 +833,7 @@ export default function SummaryPage() {
               {(() => {
                 const dates = [...new Set(history.map((h) => h.snapshot_date))].sort();
                 if (dates.length < 2) return null;
-                const CHART_COLORS = ["#fbbf24", "#34d399", "#60a5fa", "#f87171", "#a78bfa", "#fb923c"];
+                const CHART_COLORS = PLAYER_COLORS;
                 const order = [...results].sort((a, b) => b.winProb - a.winProb);
                 const byPlayerDate = new Map<string, number>();
                 for (const h of history) byPlayerDate.set(`${h.player_id}|${h.snapshot_date}`, Number(h.expected_points));
@@ -847,7 +862,7 @@ export default function SummaryPage() {
                         <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize={10} fill="#64748b">{fmt(dates[i])}</text>
                       ))}
                       {order.map((p, idx) => {
-                        const color = CHART_COLORS[idx % CHART_COLORS.length];
+                        const color = CHART_COLORS[(colorIdx.get(p.playerId) ?? idx) % CHART_COLORS.length];
                         const pts = dates
                           .map((d, i) => ({ i, v: byPlayerDate.get(`${p.playerId}|${d}`) }))
                           .filter((q) => q.v !== undefined) as { i: number; v: number }[];
@@ -864,7 +879,7 @@ export default function SummaryPage() {
                     <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
                       {order.map((p, idx) => (
                         <span key={p.playerId} className="flex items-center gap-1.5 text-xs text-slate-300">
-                          <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} />
+                          <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[(colorIdx.get(p.playerId) ?? idx) % CHART_COLORS.length] }} />
                           {p.playerName}
                         </span>
                       ))}
@@ -946,6 +961,80 @@ export default function SummaryPage() {
                     </div>
                     <p className="mt-3 text-center text-[0.65rem] text-slate-600">
                       Fx: {order[0]?.playerName} slutter bedre end {order[1]?.playerName} i {Math.round((pairwise[order[0]?.playerId]?.[order[1]?.playerId] ?? 0) * 100)}% af de simulerede turneringer
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {/* Placeringsmatrix */}
+              {results.length >= 2 && Object.keys(placeProb).length > 0 && (() => {
+                const order = [...results].sort((a, b) => b.winProb - a.winProb);
+                const nPlaces = order.length;
+                const MEDALS = ["🥇", "🥈", "🥉"];
+                const cellBg = (prob: number): string => {
+                  // intensitet efter sandsynlighed: 0% næsten usynlig → 100% kraftig blå
+                  const a = 0.04 + prob * 0.5;
+                  return `rgba(59, 130, 246, ${a.toFixed(2)})`;
+                };
+                // Mest sandsynlige placering pr. spiller fremhæves
+                const bestPlace = new Map<string, number>();
+                for (const p of order) {
+                  const dist = placeProb[p.playerId] ?? [];
+                  let bi = 0;
+                  for (let r = 1; r < nPlaces; r++) if ((dist[r] ?? 0) > (dist[bi] ?? 0)) bi = r;
+                  bestPlace.set(p.playerId, bi);
+                }
+                return (
+                  <div className="rounded-xl border border-white/10 bg-slate-950/70 p-5 sm:col-span-2">
+                    <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-blue-300/80">
+                      🏁 Slutplaceringer — sandsynlighed pr. placering
+                    </p>
+                    <p className="mb-4 text-[0.65rem] text-slate-500">
+                      Hver celle viser sandsynligheden for at <span className="text-slate-300">kolonnens</span> spiller ender på <span className="text-slate-300">rækkens</span> placering. Hver kolonne summer til 100 %.
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          <tr>
+                            <th className="sticky left-0 z-10 bg-slate-950/70 px-2 py-2 text-left text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500">
+                              Placering
+                            </th>
+                            {order.map((p) => (
+                              <th key={p.playerId} className="px-2 py-2 text-center text-[0.65rem] font-semibold text-slate-300 whitespace-nowrap">
+                                {p.playerName}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Array.from({ length: nPlaces }, (_, r) => (
+                            <tr key={r}>
+                              <td className="sticky left-0 z-10 bg-slate-950/70 px-2 py-2 text-left text-[0.65rem] font-semibold text-slate-300 whitespace-nowrap">
+                                {MEDALS[r] ?? "•"} {r + 1}. plads
+                              </td>
+                              {order.map((p) => {
+                                const prob = placeProb[p.playerId]?.[r] ?? 0;
+                                const isBest = bestPlace.get(p.playerId) === r;
+                                return (
+                                  <td
+                                    key={p.playerId}
+                                    className={cn(
+                                      "px-2 py-2 text-center tabular-nums",
+                                      isBest ? "font-bold text-white" : "font-medium text-slate-300",
+                                    )}
+                                    style={{ backgroundColor: cellBg(prob), boxShadow: isBest ? "inset 0 0 0 1px rgba(147, 197, 253, 0.45)" : undefined }}
+                                  >
+                                    {prob > 0 && prob < 0.005 ? "<1%" : `${Math.round(prob * 100)}%`}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-3 text-center text-[0.65rem] text-slate-600">
+                      Spillerens mest sandsynlige placering er indrammet · baseret på de samme 8.000 simulerede turneringer som vindchancen
                     </p>
                   </div>
                 );

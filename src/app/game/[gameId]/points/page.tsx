@@ -6,7 +6,9 @@ import { ArrowLeft, Check, Loader2, RefreshCw, Share2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { calcTeamPoints } from "@/lib/scoring";
 import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
-import { getTournament, getTournamentForGame, matchPointsForTournament, leagueQualBonusForTournament, type TournamentConfig } from "@/lib/tournaments";
+import { simulateClTournament } from "@/lib/tournaments/cl-sim";
+import { colorByPlayerName } from "@/lib/player-colors";
+import { getTournament, getTournamentForGame, matchPointsForTournament, leagueQualBonusForTournament, calcPointsForTournament, type TournamentConfig } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
 type MatchRow = {
@@ -41,6 +43,7 @@ export default function PointsPage() {
   const [loading, setLoading] = useState(true);
   const [shareDone, setShareDone] = useState(false);
   const [estDev, setEstDev] = useState<{ labels: string[]; series: { name: string; values: number[] }[] } | null>(null);
+  const [ownerColors, setOwnerColors] = useState<Map<string, string>>(new Map());
 
   useEffect(() => { if (gameId) void load(); }, [gameId]);
 
@@ -63,6 +66,7 @@ export default function PointsPage() {
 
     const teamNameById = new Map(((teamsRes.data ?? []) as Record<string, unknown>[]).map((t) => [String(t.id), String(t.name)]));
     const playerNameById = new Map(((playersRes.data ?? []) as Record<string, unknown>[]).map((p) => [String(p.id), String(p.name)]));
+    setOwnerColors(colorByPlayerName([...playerNameById.entries()].map(([id, name]) => ({ id, name }))));
 
     const matches: MatchRow[] = ((matchesRes.data ?? []) as Record<string, unknown>[]).map((m) => ({
       home_team: String(m.home_team), away_team: String(m.away_team), stage: String(m.stage),
@@ -194,6 +198,78 @@ export default function PointsPage() {
           .sort((a, b) => (b.values.at(-1) ?? 0) - (a.values.at(-1) ?? 0));
         setEstDev({ labels, series });
       }, 0);
+    } else if (cfg.id === "cl2627") {
+      // CL: checkpoint efter hver spillet ligarunde + hver knockout-runde.
+      // Ved hvert checkpoint låses kampene til og med runden; senere kampe
+      // demoteres til "planlagt" (kampprogrammet kendes, resultatet ikke).
+      setTimeout(() => {
+        const gtRows = (gtRes.data ?? []) as Record<string, unknown>[];
+        const ownedByPlayer = new Map<string, string[]>(); // playerId → rå holdnavne
+        const ownerByTeam = new Map<string, string>();     // kanonisk (lower) → playerId
+        for (const gt of gtRows) {
+          const tn = teamNameById.get(String(gt.team_id));
+          const pid = gt.owner_player_id ? String(gt.owner_player_id) : null;
+          if (!tn || !pid) continue;
+          (ownedByPlayer.get(pid) ?? ownedByPlayer.set(pid, []).get(pid)!).push(tn);
+          ownerByTeam.set((cfg.findTeam(tn)?.name ?? tn).toLowerCase(), pid);
+        }
+        const playerIds = [...ownedByPlayer.keys()];
+        if (playerIds.length === 0) return;
+
+        // Runde-indeks pr. ligakamp: kampens placering i holdets daterede kampliste
+        const canonL = (n: string) => (cfg.findTeam(n)?.name ?? n).toLowerCase();
+        const leagueMs = matches
+          .filter((m) => m.stage === "league" && m.home_team !== "TBD" && m.away_team !== "TBD")
+          .sort((a, b) => (a.match_date ?? "").localeCompare(b.match_date ?? ""));
+        const perTeamIdx = new Map<string, number>();
+        const roundOf = new Map<MatchRow, number>(); // 0-baseret
+        for (const m of leagueMs) {
+          let r = 0;
+          for (const t of [canonL(m.home_team), canonL(m.away_team)]) {
+            const i = perTeamIdx.get(t) ?? 0;
+            r = Math.max(r, i);
+            perTeamIdx.set(t, i + 1);
+          }
+          roundOf.set(m, r);
+        }
+
+        const asScheduled = (m: MatchRow): MatchRow =>
+          ({ ...m, home_score: null, away_score: null, result_type: null, winner_side: null, status: "scheduled" });
+        const leagueTrunc = (k: number) => // runde < k beholdes som spillet; resten planlagt; knockout droppes
+          leagueMs.map((m) => (m.status === "finished" && (roundOf.get(m) ?? 0) < k ? m : asScheduled(m)));
+
+        const koOrder = ["playoff", "round_of_16", "quarter_final", "semi_final", "final"];
+        const koLabel: Record<string, string> = { playoff: "Efter playoff", round_of_16: "Efter 1/8", quarter_final: "Efter 1/4", semi_final: "Efter 1/2", final: "Efter finalen" };
+        const checkpoints: { label: string; truncated: MatchRow[] }[] = [{ label: "Start", truncated: leagueTrunc(0) }];
+        for (let k = 1; k <= cfg.leagueRounds; k++) {
+          if (leagueMs.some((m) => m.status === "finished" && (roundOf.get(m) ?? 0) === k - 1)) {
+            checkpoints.push({ label: `Efter ${k}. runde`, truncated: leagueTrunc(k) });
+          }
+        }
+        for (let i = 0; i < koOrder.length; i++) {
+          if (matches.some((m) => m.stage === koOrder[i] && m.status === "finished")) {
+            const allowed = new Set(["league", ...koOrder.slice(0, i + 1)]);
+            checkpoints.push({ label: koLabel[koOrder[i]], truncated: matches.filter((m) => allowed.has(m.stage)) });
+          }
+        }
+        if (checkpoints.length < 2) return; // først interessant når der er spillet kampe
+
+        const labels: string[] = [];
+        const values = new Map<string, number[]>(playerIds.map((p) => [p, []]));
+        for (const cp of checkpoints) {
+          const basePoints = new Map<string, number>();
+          for (const [pid, names] of ownedByPlayer) {
+            basePoints.set(pid, names.reduce((s, n) => s + calcPointsForTournament(cfg, n, cp.truncated), 0));
+          }
+          const res = simulateClTournament(cp.truncated, { playerIds, basePoints, ownerByTeam, N: 3000 });
+          labels.push(cp.label);
+          for (const pid of playerIds) values.get(pid)!.push(Math.round(res.expectedPoints[pid] ?? 0));
+        }
+        const series = playerIds
+          .map((pid) => ({ name: playerNameById.get(pid) ?? "?", values: values.get(pid)! }))
+          .sort((a, b) => (b.values.at(-1) ?? 0) - (a.values.at(-1) ?? 0));
+        setEstDev({ labels, series });
+      }, 0);
     }
   }
 
@@ -213,7 +289,7 @@ export default function PointsPage() {
   for (const r of rows) {
     if (!r.owner) continue;
     const arr = playerAgg.get(r.owner) ?? new Array(COLS.length).fill(0);
-    for (let i = 0; i < COLS.length; i++) arr[i] += (i < 3 ? r.group[i] : r.knockout[i - 3]) ?? 0;
+    for (let i = 0; i < COLS.length; i++) arr[i] += (i < tournament.leagueRounds ? r.group[i] : r.knockout[i - tournament.leagueRounds]) ?? 0;
     playerAgg.set(r.owner, arr);
   }
   const series = [...playerAgg.entries()]
@@ -349,7 +425,7 @@ export default function PointsPage() {
                     <text key={i} x={x(i)} y={H - 9} textAnchor="middle" fontSize={9} fill="#64748b">{lab}</text>
                   ))}
                   {series.map((s, idx) => {
-                    const color = COLORS[idx % COLORS.length];
+                    const color = ownerColors.get(s.name) ?? COLORS[idx % COLORS.length];
                     const path = labels.map((_, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(s.cum[i] ?? 0).toFixed(1)}`).join(" ");
                     return (
                       <g key={s.name}>
@@ -362,7 +438,7 @@ export default function PointsPage() {
                 <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
                   {series.map((s, idx) => (
                     <span key={s.name} className="flex items-center gap-1.5 text-xs text-slate-300">
-                      <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                      <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: ownerColors.get(s.name) ?? COLORS[idx % COLORS.length] }} />
                       {s.name} <span className="tabular-nums text-slate-500">{s.total.toLocaleString("da-DK")}</span>
                     </span>
                   ))}
@@ -389,7 +465,7 @@ export default function PointsPage() {
               <div className="rounded-2xl border border-white/[0.08] bg-slate-950/55 p-5 shadow-xl backdrop-blur-md">
                 <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-emerald-300/80">🔮 Estimeret slutpoint — udvikling pr. runde</p>
                 <p className="mb-4 text-[0.65rem] text-slate-500">
-                  Hvad bracket-simuleringen ville have estimeret hver spillers slutpoint til efter hver runde
+                  Hvad simuleringen ville have estimeret hver spillers slutpoint til efter hver runde
                 </p>
                 <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 300 }}>
                   {gridVals.map((gv, gi) => (
@@ -402,7 +478,7 @@ export default function PointsPage() {
                     <text key={i} x={x(i)} y={H - 9} textAnchor="middle" fontSize={9} fill="#64748b">{lab}</text>
                   ))}
                   {est.map((s, idx) => {
-                    const color = COLORS[idx % COLORS.length];
+                    const color = ownerColors.get(s.name) ?? COLORS[idx % COLORS.length];
                     const path = labels.map((_, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(s.values[i] ?? 0).toFixed(1)}`).join(" ");
                     return (
                       <g key={s.name}>
@@ -417,7 +493,7 @@ export default function PointsPage() {
                     const delta = (s.values.at(-1) ?? 0) - (s.values[0] ?? 0);
                     return (
                       <span key={s.name} className="flex items-center gap-1.5 text-xs text-slate-300">
-                        <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                        <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: ownerColors.get(s.name) ?? COLORS[idx % COLORS.length] }} />
                         {s.name} <span className="tabular-nums text-slate-500">{(s.values.at(-1) ?? 0).toLocaleString("da-DK")}</span>
                         <span className={cn("tabular-nums text-[0.65rem]", delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-slate-600")}>
                           ({delta > 0 ? "+" : ""}{delta.toLocaleString("da-DK")})
@@ -427,7 +503,7 @@ export default function PointsPage() {
                   })}
                 </div>
                 <p className="mt-3 text-center text-[0.65rem] text-slate-600">
-                  4.000 simuleringer pr. checkpoint · spillede kampe til og med runden er låst, resten simuleres
+                  Tusindvis af simuleringer pr. checkpoint · spillede kampe til og med runden er låst, resten simuleres
                 </p>
               </div>
             );

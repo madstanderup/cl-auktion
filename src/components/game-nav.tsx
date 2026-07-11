@@ -29,7 +29,7 @@ export function GameNav({ gameId }: { gameId: string }) {
   const links: { href: string; label: string; icon?: React.ReactNode; exact?: boolean }[] = [
     { href: base, label: "Spilside", icon: <Trophy className="size-3.5" />, exact: true },
     { href: `${base}/matches`, label: "Kampe", icon: <CalendarDays className="size-3.5" /> },
-    { href: `${base}/bracket`, label: "🏆 Bracket" },
+    { href: `${base}/bracket`, label: "🏆 Turnering" },
     { href: `${base}/bids`, label: "Budoversigt", icon: <Table2 className="size-3.5" /> },
     { href: `${base}/summary`, label: "Summary", icon: <TrendingUp className="size-3.5" /> },
     { href: `${base}/points`, label: "Pointoversigt", icon: <Trophy className="size-3.5" /> },

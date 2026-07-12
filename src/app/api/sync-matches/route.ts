@@ -198,11 +198,22 @@ async function runSync(_req: Request) {
     const stage     = STAGE_MAP[m.stageNormalized];
     const matchDate = extractDate(m);
     // Brug API's status-felt: "finished" | "live" | alt → "scheduled"
-    const apiStatus = m.status === "finished" ? "finished" : m.status === "live" ? "live" : "scheduled";
-    const isFinished = apiStatus === "finished";
+    let apiStatus = m.status === "finished" ? "finished" : m.status === "live" ? "live" : "scheduled";
     const hasPenalties = !!(m.penalties ?? m.penaltyShootout);
     const resultType = hasPenalties ? "penalties" : m.extraTime ? "extra_time" : "normal_time";
     const winnerSide = getPenaltyWinner(m);
+    // Stol ikke på umulige resultater: en "færdig" kamp uden scorer, eller en
+    // "færdig" knockout-kamp der står lige uden straffe-vinder, er ufuldstændig
+    // API-data (set i praksis: QF meldt finished som 0-0 uden forlængelse).
+    // Behandl den som live, så der ikke gives forkerte point — admin kan rette
+    // manuelt, og en manuel rettelse overskrives ikke af senere syncs.
+    if (apiStatus === "finished") {
+      const missingScores = m.homeScore == null || m.awayScore == null;
+      const knockoutDrawWithoutWinner =
+        stage !== "group" && m.homeScore != null && m.homeScore === m.awayScore && !winnerSide;
+      if (missingScores || knockoutDrawWithoutWinner) apiStatus = "live";
+    }
+    const isFinished = apiStatus === "finished";
 
     for (const gameId of gameIds) {
       // Slå op: foretruk zafronix_id, så kanoniske navne, så rå API-navne

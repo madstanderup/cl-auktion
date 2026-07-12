@@ -40,6 +40,11 @@ type PlayerOwnershipSummary = {
   coins: number;
   teams: string[];
 };
+type TeamListEntry = {
+  teamId: string;
+  name: string;
+  ownerName: string | null;
+};
 
 export default function AuctionPage() {
   const [gameId, setGameId] = useState<string | null>(null);
@@ -64,7 +69,8 @@ export default function AuctionPage() {
     bidsCurrentRound: 0,
   });
   const [ownershipSummary, setOwnershipSummary] = useState<PlayerOwnershipSummary[]>([]);
-  const [victoryTick, setVictoryTick] = useState(0);
+  const [teamList, setTeamList] = useState<TeamListEntry[]>([]);
+  const [now, setNow] = useState(() => Date.now());
   const [revealedBids, setRevealedBids] = useState<{ playerName: string; amount: number }[]>([]);
   const [lastResult, setLastResult] = useState<{
     teamName: string; winnerName: string; winningBid: number;
@@ -76,6 +82,8 @@ export default function AuctionPage() {
   const lastRoundRef = useRef<{ round: string; phase: number } | null>(null);
   // Bruges til at undgå dobbelt-fetch af samme runde
   const lastSavedResultRoundRef = useRef<string | null>(null);
+  // Runde+fase hvor der allerede er auto-budt 0 (spiller uden mønter)
+  const autoBidKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     try {
@@ -214,6 +222,41 @@ export default function AuctionPage() {
     setOwnershipSummary(summary);
   }, []);
 
+  const loadTeamList = useCallback(async (gid: string) => {
+    const { data: gtRows } = await supabase
+      .from("game_teams")
+      .select("team_id, owner_player_id")
+      .eq("game_id", gid);
+    if (!gtRows) return;
+
+    const teamIds = [...new Set(gtRows.map((r) => String(r.team_id)))];
+    const { data: teamNames } =
+      teamIds.length > 0
+        ? await supabase.from("teams").select("id,name").in("id", teamIds)
+        : { data: [] as { id: string; name: string }[] };
+    const nameByTeamId = new Map((teamNames ?? []).map((t) => [String(t.id), String(t.name)]));
+
+    const ownerIds = [
+      ...new Set(gtRows.filter((r) => r.owner_player_id).map((r) => String(r.owner_player_id))),
+    ];
+    const { data: ownerRows } =
+      ownerIds.length > 0
+        ? await supabase.from("players").select("id,name").in("id", ownerIds)
+        : { data: [] as { id: string; name: string }[] };
+    const nameByOwnerId = new Map((ownerRows ?? []).map((p) => [String(p.id), String(p.name)]));
+
+    const list = gtRows
+      .map((r) => ({
+        teamId: String(r.team_id),
+        name: nameByTeamId.get(String(r.team_id)) ?? "?",
+        ownerName: r.owner_player_id
+          ? (nameByOwnerId.get(String(r.owner_player_id)) ?? "?")
+          : null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "da"));
+    setTeamList(list);
+  }, []);
+
   // Henter bud for en afgjort runde og gemmer dem i lastResult + revealedBids.
   // Kaldes direkte fra realtime-callback så React-batching ikke kan forhindre det.
   const fetchAndSaveResult = useCallback(async (
@@ -337,7 +380,8 @@ export default function AuctionPage() {
   useEffect(() => {
     if (!gameId) return;
     void loadOwnershipSummary(gameId);
-  }, [gameId, loadOwnershipSummary]);
+    void loadTeamList(gameId);
+  }, [gameId, loadOwnershipSummary, loadTeamList]);
 
   useEffect(() => {
     if (!gameId) return;
@@ -346,11 +390,12 @@ export default function AuctionPage() {
     const interval = window.setInterval(() => {
       void loadRoomStats(gameId, auction?.current_round_id ?? null, auction?.current_phase ?? 0);
       void loadOwnershipSummary(gameId);
+      void loadTeamList(gameId);
     }, 2500);
     return () => {
       window.clearInterval(interval);
     };
-  }, [auction?.current_phase, auction?.current_round_id, gameId, loadOwnershipSummary, loadRoomStats]);
+  }, [auction?.current_phase, auction?.current_round_id, gameId, loadOwnershipSummary, loadRoomStats, loadTeamList]);
 
   useEffect(() => {
     if (!gameId) return;
@@ -418,6 +463,7 @@ export default function AuctionPage() {
         () => {
           void loadRoomStats(gameId, auction?.current_round_id ?? null, auction?.current_phase ?? 0);
           void loadOwnershipSummary(gameId);
+          void loadTeamList(gameId);
         },
       )
       .on(
@@ -435,12 +481,11 @@ export default function AuctionPage() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [auction?.current_phase, auction?.current_round_id, gameId, loadOwnershipSummary, loadRoomStats]);
+  }, [auction?.current_phase, auction?.current_round_id, gameId, loadOwnershipSummary, loadRoomStats, loadTeamList]);
 
-  const isTiedPlayer = useMemo(() => {
-    if (!playerId || !auction?.tied_player_ids) return false;
-    return auction.tied_player_ids.includes(playerId);
-  }, [auction?.tied_player_ids, playerId]);
+  const isTiedPlayer = Boolean(
+    playerId && auction?.tied_player_ids?.includes(playerId),
+  );
 
   const minBid = useMemo(() => {
     if (!auction) return 0;
@@ -517,17 +562,57 @@ export default function AuctionPage() {
     };
   }, [auction?.current_phase, auction?.current_round_id, auction?.status, gameId, isTiedPlayer, player?.id]);
 
-  const victoryBannerActive = useMemo(() => {
-    if (!auction?.resolution_winner_name || !auction.resolution_until) return false;
-    return new Date(auction.resolution_until).getTime() > Date.now();
-  }, [auction?.resolution_until, auction?.resolution_winner_name, victoryTick]);
+  // Spillere uden mønter byder automatisk 0, så runden ikke venter på dem.
+  useEffect(() => {
+    if (!player || !auction || !gameId) return;
+    if (player.coins !== 0 || hasBidThisPhase) return;
+    if (!auction.current_round_id || !auction.current_team_name) return;
+    if (!(auction.status === "bidding" || (auction.status === "tie_breaker" && isTiedPlayer))) return;
+
+    const key = `${auction.current_round_id}:${auction.current_phase}`;
+    if (autoBidKeyRef.current === key) return;
+    autoBidKeyRef.current = key;
+
+    void (async () => {
+      const { error } = await supabase.from("auction_room_bids").insert({
+        game_id: gameId,
+        player_id: player.id,
+        team_name: auction.current_team_name,
+        amount: 0,
+        round_id: auction.current_round_id,
+        bid_phase: auction.current_phase,
+      });
+      if (error) {
+        // Tillad nyt forsøg (fx hvis migrationen der tillader 0-bud mangler)
+        autoBidKeyRef.current = null;
+        return;
+      }
+      setHasBidThisPhase(true);
+      setBidSuccessMsg("Du har 0 mønter — der er automatisk budt 0 for dig.");
+    })();
+  }, [auction, gameId, hasBidThisPhase, isTiedPlayer, player]);
+
+  const victoryBannerActive = Boolean(
+    auction?.resolution_winner_name &&
+      auction.resolution_until &&
+      new Date(auction.resolution_until).getTime() > now,
+  );
 
   useEffect(() => {
     if (!auction?.resolution_until || !auction.resolution_winner_name) return;
     const end = new Date(auction.resolution_until).getTime();
-    if (end <= Date.now()) return;
-    const id = window.setInterval(() => setVictoryTick((x) => x + 1), 250);
-    return () => window.clearInterval(id);
+    const tick = () => {
+      setNow(Date.now());
+      // Stop med at ticke når banneret er udløbet — ellers re-renderer siden hvert 250 ms
+      if (Date.now() > end) window.clearInterval(id);
+    };
+    const id = window.setInterval(tick, 250);
+    // Opdater 'now' med det samme (asynkront, så React ikke får et sync setState i effect-kroppen)
+    const immediate = window.setTimeout(tick, 0);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(immediate);
+    };
   }, [auction?.resolution_until, auction?.resolution_winner_name]);
 
   // Hent alle bud når vinder-banneret vises
@@ -607,10 +692,9 @@ export default function AuctionPage() {
     return () => { cancelled = true; };
   }, [victoryBannerActive, gameId, auction?.resolution_team_name, auction?.resolution_winner_name, auction?.resolution_winning_bid]);
 
-  const victorySecondsLeft = useMemo(() => {
-    if (!auction?.resolution_until) return 0;
-    return Math.max(0, Math.ceil((new Date(auction.resolution_until).getTime() - Date.now()) / 1000));
-  }, [auction?.resolution_until, victoryTick]);
+  const victorySecondsLeft = auction?.resolution_until
+    ? Math.max(0, Math.ceil((new Date(auction.resolution_until).getTime() - now) / 1000))
+    : 0;
 
   async function handleSubmitBid() {
     if (!player || !auction || !gameId) return;
@@ -663,10 +747,10 @@ export default function AuctionPage() {
     Boolean(auction.current_round_id);
 
   const canBid =
-    mayBidThisRound && (!hasBidThisPhase || rebidOpen) && Boolean(player);
+    mayBidThisRound && (!hasBidThisPhase || rebidOpen) && Boolean(player) && (player?.coins ?? 0) > 0;
 
   const canShowRebidButton =
-    mayBidThisRound && hasBidThisPhase && !rebidOpen && Boolean(player);
+    mayBidThisRound && hasBidThisPhase && !rebidOpen && Boolean(player) && (player?.coins ?? 0) > 0;
   const status = auction?.status ?? "waiting";
 
   const auctionFinished = roomStats.teamsTotal > 0 && roomStats.teamsWithoutOwner === 0;
@@ -761,7 +845,8 @@ export default function AuctionPage() {
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col items-center px-4 py-12 sm:px-6">
+      <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-12 sm:px-6 lg:flex-row lg:items-start lg:justify-center">
+      <main className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center lg:mx-0">
         {victoryBannerActive && auction ? (
           <div
             className="mb-4 w-full rounded-2xl border border-amber-400/40 bg-gradient-to-b from-amber-500/20 to-amber-950/40 px-5 py-5 text-center shadow-lg shadow-amber-950/30"
@@ -1082,6 +1167,57 @@ export default function AuctionPage() {
           </article>
         )}
       </main>
+
+      <aside className="mx-auto w-full max-w-lg lg:sticky lg:top-6 lg:mx-0 lg:w-72 lg:shrink-0">
+        <section className="rounded-2xl border border-white/10 bg-slate-950/50 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold tracking-wide text-white">Hold i auktionen</h2>
+            <span className="text-xs tabular-nums text-slate-400">
+              {teamList.filter((t) => t.ownerName).length}/{teamList.length} solgt
+            </span>
+          </div>
+
+          {teamList.length === 0 ? (
+            <p className="text-sm text-slate-400">Ingen hold fundet endnu.</p>
+          ) : (
+            <ul className="max-h-[70vh] space-y-0.5 overflow-y-auto pr-1">
+              {teamList.map((team) => {
+                const sold = team.ownerName != null;
+                const isCurrent =
+                  !sold && auction?.current_team_name === team.name && status !== "waiting";
+                return (
+                  <li
+                    key={team.teamId}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm",
+                      isCurrent && "border border-amber-400/40 bg-amber-500/10",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "truncate",
+                        sold
+                          ? "text-slate-600 line-through decoration-slate-600"
+                          : isCurrent
+                            ? "font-semibold text-amber-200"
+                            : "text-slate-200",
+                      )}
+                    >
+                      {team.name}
+                    </span>
+                    {sold ? (
+                      <span className="shrink-0 text-xs text-slate-600">{team.ownerName}</span>
+                    ) : isCurrent ? (
+                      <Gavel className="size-3.5 shrink-0 text-amber-300" aria-hidden />
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      </aside>
+      </div>
     </div>
   );
 }

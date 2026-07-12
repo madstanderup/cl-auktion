@@ -48,5 +48,5 @@ export type TournamentConfig = {
   /** Spilles knockout-runder som dobbeltopgør? (CL: ja, undtagen finalen) */
   twoLeggedKnockout: boolean;
   /** Resultat-kilde til sync. "none" = kun manuel indtastning. */
-  syncSource: "zafronix-wc2026" | "none";
+  syncSource: "zafronix-wc2026" | "zafronix-cl2627" | "none";
 };

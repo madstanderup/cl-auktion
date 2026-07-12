@@ -34,5 +34,7 @@ export const CL2627: TournamentConfig = {
   leagueRounds: 8,
   hasBracket: false, // CL-bracket bygges senere (playoff-seedning afhænger af ligaplaceringer)
   twoLeggedKnockout: true,
-  syncSource: "none", // Zafronix /uefa/championsleague findes — adapter kobles på når 26/27-data publiceres
+  // /api/sync-matches-cl (dagligt cron) — Zafronix ?season=2026 svarer 404
+  // indtil 26/27-datasættet publiceres; syncen no-op'er pænt indtil da.
+  syncSource: "zafronix-cl2627",
 };

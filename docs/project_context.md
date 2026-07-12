@@ -23,7 +23,7 @@
 | UI | **shadcn-**stil komponenter (`Button`, `Input`, …) |
 | Backend / data | **Supabase** (Postgres, **Realtime** `postgres_changes`, **RLS**, **RPC** `SECURITY DEFINER`) |
 | Client DB | `@supabase/supabase-js` singleton i `src/lib/supabase.ts` (anon key; kaster ved manglende env) |
-| Session (nuværende) | **`localStorage`** for `player_id`, `game_id`, admin-session (ikke egentlig login) |
+| Session (nuværende) | **Supabase Auth** (email/adgangskode via `/login` + `/register`); `localStorage` bruges som cache for `player_id`/`game_id`/admin-session og gendannes fra forsiden via `players.user_id` |
 
 **Miljø:** `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` — `next.config.ts` læser `.env.local` eksplicit så Turbopack/system-env ikke overskriver forkert.
 
@@ -48,7 +48,7 @@
 - **RPC-admin:** `admin_draw_next_team`, `admin_reveal_and_find_winner`, `admin_reset_game`, `admin_delete_player`, `create_game` — validering med `p_game_id` + `p_admin_secret` (undtagen `create_game` som returnerer secret).
 - **Afsløringslogik:** Delt i `reveal_auction_round_for_game(p_game_id, p_require_all_bids)`; seneste bud pr. spiller pr. fase via `distinct on (player_id) … order by created_at desc`.
 - **Vinder visning:** Kolonner `resolution_*` + `resolution_until` på `auction_state` i 10 sekunder (server-tidsstempel); klient skjuler når `now > resolution_until`; ryddes ved næste træk / reset / tie-break entry.
-- **Spilleridentitet:** UUID i `localStorage` — **ingen konto**; nyt device = ny tilmelding (evt. samme navn, ny række) indtil Auth tilføjes.
+- **Spilleridentitet:** Supabase Auth-konto koblet til `players.user_id`. Forsiden viser "mine spil" for den loggede ind bruger og gendanner `localStorage`-nøglerne ved valg af spil. Rejoin med invitationskode finder eksisterende spiller via `user_id` (fallback: navn, hvorefter `user_id` backfilles) — ingen dubletter ved nyt device.
 - **Realtime filters:** Kanal-filtre `game_id=eq.<uuid>` hvor muligt.
 - **Polling-fallback:** Auktionsside poller ~2,5 s til statistik/oversigt hvis events udebliver.
 
@@ -61,7 +61,7 @@
 - Køre / versionsstyre alle relevante **SQL-migrationer** i Supabase (rækkefølge: kerne → multi_game → auto_reveal → victory_banner).
 - **Seed af CL-hold** pr. spil sikres ved `create_game` (kopierer fra `teams`); tom `teams` = intet at trække.
 - **Turneringsfase:** Kobling fra `matches` / resultater til **`players.points`** (eller nye tabeller pr. `game_id`), admin-UI til indtastning, eventuel historik pr. hold/spiller.
-- **Produktion:** Supabase **Auth**, **RLS** strammet (ingen åben `update` på alt for anon), admin uden secret i `localStorage` (fx `created_by = auth.uid()` + server routes med service role hvor nødvendigt).
+- **Produktion:** ~~Supabase Auth~~ (✅ bygget — email/adgangskode + `players.user_id`-rejoin). Tilbage: **RLS** strammet (ingen åben `update`/`insert` på alt for anon — fx kan alle indsætte bud som enhver spiller), admin uden secret i `localStorage`.
 
 **Kvalitet / UX:**
 

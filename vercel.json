@@ -3,6 +3,10 @@
     {
       "path": "/api/sync-matches",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/sync-matches-cl",
+      "schedule": "30 6 * * *"
     }
   ]
 }

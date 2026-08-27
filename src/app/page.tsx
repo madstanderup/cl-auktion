@@ -527,7 +527,7 @@ export default function Home() {
                 </Link>
                 {" · "}
                 Værter:{" "}
-                <Link href="/auction/admin" className="text-amber-200/90 underline-offset-2 hover:underline">
+                <Link href="/auction/admin?new=1" className="text-amber-200/90 underline-offset-2 hover:underline">
                   opret nyt spil og få en kode
                 </Link>
               </p>

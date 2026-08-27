@@ -157,9 +157,40 @@ export default function AuctionAdminPage() {
     setMessage(null);
   }
 
+  const loadOwnedGames = useCallback(async () => {
+    const supabaseClient = createClient();
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) {
+      setMyGames([]);
+      return [] as { id: string; label: string | null; invite_code: string; admin_secret: string }[];
+    }
+    const { data: games } = await supabaseClient
+      .from("games")
+      .select("id, invite_code, label, admin_secret")
+      .eq("created_by", user.id)
+      .order("created_at", { ascending: false });
+
+    const list = (games ?? []).filter((g: Record<string, unknown>) => g.admin_secret) as {
+      id: string; label: string | null; invite_code: string; admin_secret: string;
+    }[];
+    setMyGames(list);
+    return list;
+  }, []);
+
   useEffect(() => {
     void (async () => {
       const supabaseClient = createClient();
+
+      // ?new=1 (fra forsidens "opret nyt spil"): vis opret-formularen i stedet
+      // for at hoppe ind i et gemt/eksisterende spil.
+      if (new URLSearchParams(window.location.search).get("new") === "1") {
+        router.replace("/auction/admin");
+        await loadOwnedGames();
+        setShowCreateForm(true);
+        setSessionReady(true);
+        return;
+      }
+
       const stored = readAdminSession();
 
       // Verify stored session
@@ -174,25 +205,10 @@ export default function AuctionAdminPage() {
       }
 
       // Load all games owned by this user
-      const { data: { user } } = await supabaseClient.auth.getUser();
-      if (user) {
-        const { data: games } = await supabaseClient
-          .from("games")
-          .select("id, invite_code, label, admin_secret")
-          .eq("created_by", user.id)
-          .order("created_at", { ascending: false });
-
-        const list = (games ?? []).filter((g: Record<string, unknown>) => g.admin_secret) as {
-          id: string; label: string | null; invite_code: string; admin_secret: string;
-        }[];
-
-        if (list.length === 1) {
-          // Only one game — enter it automatically
-          enterGame(list[0]);
-        } else if (list.length > 1) {
-          // Multiple games — show picker
-          setMyGames(list);
-        }
+      const list = await loadOwnedGames();
+      if (list.length === 1) {
+        // Only one game — enter it automatically
+        enterGame(list[0]);
       }
 
       setSessionReady(true);
@@ -432,6 +448,10 @@ export default function AuctionAdminPage() {
         /* ignore */
       }
       setSession(next);
+      setShowCreateForm(false);
+      setNewGameLabel("");
+      setNewPlayerName("");
+      void loadOwnedGames();
       setMessage(
         `Nyt spil oprettet. Invitationskode: ${payload.invite_code} — del den med dine spillere.`,
       );
@@ -907,7 +927,7 @@ export default function AuctionAdminPage() {
             <h1 className="text-xl font-semibold tracking-tight">Auktion Admin</h1>
           </div>
           <div className="flex gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => { localStorage.removeItem(GAME_ADMIN_SESSION_KEY); setSession(null); }}>
+            <Button type="button" variant="outline" size="sm" onClick={() => { localStorage.removeItem(GAME_ADMIN_SESSION_KEY); setSession(null); setShowCreateForm(false); void loadOwnedGames(); }}>
               Skift spil
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => router.push("/")}>

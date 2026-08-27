@@ -9,6 +9,7 @@ import { clLeagueTable, clCalcTeamPoints } from "../src/lib/tournaments/cl-scori
 import { simulateClTournament, simulateClTeamPoints } from "../src/lib/tournaments/cl-sim";
 
 const names = CL2627_TEAMS.map((t) => t.name);
+const N_TEAMS = names.length;
 const lower = (n: string) => n.toLowerCase();
 
 function m(stage: string, home: string, away: string, hs: number | null = null, as_: number | null = null): ScoreMatch {
@@ -32,16 +33,16 @@ function check(label: string, ok: boolean, detail = "") {
   const est = simulateClTeamPoints([], { currentByTeam: new Map(), N: 4000 });
   const ms = Date.now() - t0;
   const real = est.get("real madrid") ?? 0;
-  const kairat = est.get("kairat almaty") ?? 0;
+  const sabah = est.get("sabah fk") ?? 0;
   const sorted = [...est.entries()].sort((a, b) => b[1] - a[1]);
-  check("S1: alle 36 hold har forventning > 0", [...est.values()].every((v) => v > 0));
-  check("S1: Real Madrid > Kairat", real > kairat, `${Math.round(real)} vs ${Math.round(kairat)}`);
+  check(`S1: alle ${N_TEAMS} hold har forventning > 0`, [...est.values()].every((v) => v > 0));
+  check("S1: Real Madrid > Sabah FK", real > sabah, `${Math.round(real)} vs ${Math.round(sabah)}`);
   check("S1: stærkeste hold i toppen", sorted[0][1] >= real);
   check("S1: 4000 iterationer < 5s", ms < 5000, `${ms}ms`);
   console.log("     top 5:", sorted.slice(0, 5).map(([n, v]) => `${n}=${Math.round(v)}`).join(", "));
 
   // Spiller-niveau: 2 spillere, stærke vs svage hold
-  const owner = new Map([["real madrid", "A"], ["liverpool", "A"], ["pafos", "B"], ["kairat almaty", "B"]]);
+  const owner = new Map([["bayern münchen", "A"], ["arsenal", "A"], ["lask linz", "B"], ["sabah fk", "B"]]);
   const res = simulateClTournament([], {
     playerIds: ["A", "B"], basePoints: new Map([["A", 0], ["B", 0]]), ownerByTeam: owner, N: 4000,
   });
@@ -57,37 +58,41 @@ function check(label: string, ok: boolean, detail = "") {
     `${res.placeProb["A"][0].toFixed(3)} vs ${res.winProb["A"].toFixed(3)}`);
 }
 
-// ── Scenario 2: midt i ligaen — FCK har vundet 3 kampe ──────────────────
+// ── Scenario 2: midt i ligaen — Sabah FK har vundet 3 kampe ─────────────
 {
   const matches: ScoreMatch[] = [
-    m("league", "FC København", "Real Madrid", 2, 0),
-    m("league", "FC København", "Liverpool", 1, 0),
-    m("league", "FC København", "PSG", 3, 1),
+    m("league", "Sabah FK", "Real Madrid", 2, 0),
+    m("league", "Sabah FK", "Liverpool", 1, 0),
+    m("league", "Sabah FK", "PSG", 3, 1),
     m("league", "Barcelona", "Arsenal"), // planlagt, ikke spillet
   ];
-  const cur = clCalcTeamPoints("FC København", matches);
-  check("S2: FCK current = 450 (3 sejre)", cur === 450, String(cur));
+  const cur = clCalcTeamPoints("Sabah FK", matches);
+  check("S2: Sabah current = 450 (3 sejre)", cur === 450, String(cur));
 
-  const est = simulateClTeamPoints(matches, { currentByTeam: new Map([["fc københavn", cur]]), N: 4000 });
+  const est = simulateClTeamPoints(matches, { currentByTeam: new Map([["sabah fk", cur]]), N: 4000 });
   const baseline = simulateClTeamPoints([], { currentByTeam: new Map(), N: 4000 });
-  const fckNow = est.get("fc københavn") ?? 0;
-  const fckStart = baseline.get("fc københavn") ?? 0;
-  check("S2: FCK-forventning >= current (låst gulv)", fckNow >= cur, `${Math.round(fckNow)} vs ${cur}`);
-  check("S2: FCK-forventning steget markant", fckNow > fckStart + 300, `${Math.round(fckNow)} vs start ${Math.round(fckStart)}`);
+  const sabahNow = est.get("sabah fk") ?? 0;
+  const sabahStart = baseline.get("sabah fk") ?? 0;
+  check("S2: Sabah-forventning >= current (låst gulv)", sabahNow >= cur, `${Math.round(sabahNow)} vs ${cur}`);
+  check("S2: Sabah-forventning steget markant", sabahNow > sabahStart + 300, `${Math.round(sabahNow)} vs start ${Math.round(sabahStart)}`);
   const realNow = est.get("real madrid") ?? 0;
   const realStart = baseline.get("real madrid") ?? 0;
   check("S2: Real Madrid-forventning faldet", realNow < realStart, `${Math.round(realNow)} vs start ${Math.round(realStart)}`);
 }
 
-// ── Hjælper: fuld, konsistent liga (144 kampe, cirkelmetoden) ────────────
+// ── Hjælper: fuld, konsistent liga (8 runder, cirkelmetoden) ─────────────
+// Ved ulige antal hold får ét hold en bye pr. runde (-1 i skemaet).
 function fullLeague(): ScoreMatch[] {
-  const idx = [...Array(36).keys()];
+  const slots = [...Array(N_TEAMS).keys()];
+  if (slots.length % 2 === 1) slots.push(-1);
+  const n = slots.length;
   const out: ScoreMatch[] = [];
-  let rot = idx.slice(1);
+  let rot = slots.slice(1);
   for (let r = 0; r < 8; r++) {
-    const round = [idx[0], ...rot];
-    for (let i = 0; i < 18; i++) {
-      const a = round[i], b = round[35 - i];
+    const round = [slots[0], ...rot];
+    for (let i = 0; i < n / 2; i++) {
+      const a = round[i], b = round[n - 1 - i];
+      if (a < 0 || b < 0) continue; // bye
       // laveste katalogindeks (stærkeste) vinder altid 2-0
       out.push(a < b ? m("league", names[a], names[b], 2, 0) : m("league", names[b], names[a], 2, 0));
     }
@@ -100,14 +105,14 @@ function fullLeague(): ScoreMatch[] {
 {
   const matches = fullLeague();
   const table = clLeagueTable(matches);
-  check("S3: tabel har 36 hold", table.length === 36);
+  check(`S3: tabel har ${N_TEAMS} hold`, table.length === N_TEAMS);
 
   const cur = new Map(names.map((n) => [lower(n), clCalcTeamPoints(n, matches)]));
   const est = simulateClTeamPoints(matches, { currentByTeam: cur, N: 4000 });
 
-  // nr. 25-36 er ude — forventning skal være låst på current
+  // nr. 25 og nedefter er ude — forventning skal være låst på current
   const outOk = table.slice(24).every((r) => Math.abs((est.get(r.name) ?? 0) - (cur.get(r.name) ?? 0)) < 1e-9);
-  check("S3: nr. 25-36 får ingen sim-point", outOk);
+  check(`S3: nr. 25-${N_TEAMS} får ingen sim-point`, outOk);
   // top 8 får ikke top8-bonus igen i sim (ligger i current)
   const no1 = table[0].name;
   check("S3: nr. 1 forventning >= current + knockout-udbytte", (est.get(no1) ?? 0) > (cur.get(no1) ?? 0) + 200,
@@ -169,13 +174,13 @@ function fullLeague(): ScoreMatch[] {
   const est = simulateClTeamPoints(scheduled, { currentByTeam: new Map(), N: 4000 });
   const sorted = [...est.entries()].sort((a, b) => b[1] - a[1]);
   check("S5: alle hold har forventning > 0 med rent kampprogram", [...est.values()].every((v) => v > 0));
-  check("S5: Real Madrid i top 3", sorted.slice(0, 3).some(([n]) => n === "real madrid"),
+  check("S5: Bayern München i top 3", sorted.slice(0, 3).some(([n]) => n === "bayern münchen"),
     sorted.slice(0, 3).map(([n]) => n).join(", "));
   // Med kendt kampprogram skal niveauet ligne fantom-baseline (S1)
   const baseline = simulateClTeamPoints([], { currentByTeam: new Map(), N: 4000 });
-  const real = est.get("real madrid")!, realBase = baseline.get("real madrid")!;
-  check("S5: niveau ligner fantom-baseline (±20%)", Math.abs(real - realBase) / realBase < 0.2,
-    `${Math.round(real)} vs ${Math.round(realBase)}`);
+  const bayern = est.get("bayern münchen")!, bayernBase = baseline.get("bayern münchen")!;
+  check("S5: niveau ligner fantom-baseline (±20%)", Math.abs(bayern - bayernBase) / bayernBase < 0.2,
+    `${Math.round(bayern)} vs ${Math.round(bayernBase)}`);
 }
 
 console.log(failures === 0 ? "\nAlle checks bestået ✔" : `\n${failures} check(s) FEJLEDE ✘`);

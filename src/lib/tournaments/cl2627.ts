@@ -4,14 +4,14 @@ import type { TournamentConfig } from "./types";
 
 /**
  * Champions League 26/27.
- * Holdlisten er en DUMMY (25/26-deltagerne) indtil kvalifikationen er
- * afgjort. Pointberegning sker via den dedikerede CL-motor
- * (cl-scoring.ts) — scoring-feltet her er deklarativt til visning.
+ * Holdlisten er de 36 kvalificerede hold med Elo-rating (cl2627-teams.ts).
+ * Pointberegning sker via den dedikerede CL-motor (cl-scoring.ts) —
+ * scoring-feltet her er deklarativt til visning.
  */
 export const CL2627: TournamentConfig = {
   id: "cl2627",
   label: "Champions League 26/27",
-  teamCount: 36,
+  teamCount: CL2627_TEAMS.length,
   teams: CL2627_TEAMS,
   findTeam: findCL2627Team,
   scoring: {

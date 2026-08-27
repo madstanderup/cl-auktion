@@ -1,5 +1,5 @@
 import type { ScoreMatch } from "@/lib/scoring";
-import { CL2627_TEAMS, findCL2627Team } from "./cl2627-teams";
+import { CL2627_TEAMS, findCL2627Team, eloStrength } from "./cl2627-teams";
 import {
   clTieWinner, isLeagueComplete, clLeagueTable,
   CL_LEAGUE_WIN, CL_LEAGUE_DRAW, CL_KO_WIN, CL_KO_DRAW, CL_ET_WIN,
@@ -12,7 +12,7 @@ import {
  * currentByTeam), resten simuleres:
  *
  *  - Ligakampe afgøres med Poisson-mål fordelt efter styrkeforholdet
- *    (mean-værdier), så uafgjort og tabellens tiebreaks (målforskel, scorede
+ *    (Elo-baserede styrker), så uafgjort og tabellens tiebreaks (målforskel, scorede
  *    mål) kommer naturligt.
  *  - Mangler der ligakampe i databasen (kampprogrammet er ikke tastet ind
  *    endnu), fyldes hvert holds resterende runder med tilfældige modstandere
@@ -30,8 +30,8 @@ import {
 const LEAGUE_ROUNDS = 8;
 /** Forventet samlet antal mål pr. kamp — fordeles efter styrkeforholdet. */
 const GOALS_PER_MATCH = 3.0;
-/** Styrke for hold der ikke findes i kataloget. */
-const DEFAULT_STRENGTH = 150;
+/** Elo for hold der ikke findes i kataloget (på niveau med feltets bundhold). */
+const DEFAULT_ELO = 1400;
 
 type KOStageDef = { key: string; legs: number; ties: number };
 const KO_STAGES: KOStageDef[] = [
@@ -84,7 +84,7 @@ function buildRunner(matches: ScoreMatch[], extraNames: string[]): Runner {
       i = names.length;
       idxByName.set(key, i);
       names.push(key);
-      strengths.push(Math.max(1, findCL2627Team(key)?.mean ?? DEFAULT_STRENGTH));
+      strengths.push(eloStrength(findCL2627Team(key)?.elo ?? DEFAULT_ELO));
     }
     return i;
   };
@@ -379,6 +379,50 @@ export function simulateClTeamPoints(
   const out = new Map<string, number>();
   for (let t = 0; t < runner.teamCount; t++) {
     out.set(runner.names[t], (currentByTeam.get(runner.names[t]) ?? 0) + sums[t] / N);
+  }
+  return out;
+}
+
+/**
+ * Fordelingen af et holds slutpoint — grundlaget for mean/median/stdDev i
+ * holdkataloget (genereres med scripts/cl-derive-stats.ts).
+ *
+ * Point er altid multipla af 50, så medianen læses ud af et histogram med
+ * 50-points spande i stedet for at gemme alle N stikprøver.
+ */
+export function simulateClTeamStats(
+  matches: ScoreMatch[],
+  opts: { currentByTeam?: Map<string, number>; N?: number } = {},
+): Map<string, { mean: number; median: number; stdDev: number }> {
+  const { currentByTeam = new Map<string, number>(), N = 100_000 } = opts;
+  const runner = buildRunner(matches, [...currentByTeam.keys()]);
+  const T = runner.teamCount;
+
+  const BUCKET = 50, BUCKETS = 121; // 0-6.000 point dækker det maksimalt opnåelige
+  const hist = Array.from({ length: T }, () => new Int32Array(BUCKETS));
+  const sum = new Float64Array(T), sumSq = new Float64Array(T);
+  const simPts = new Float64Array(T);
+  const base = Array.from({ length: T }, (_, t) => currentByTeam.get(runner.names[t]) ?? 0);
+
+  for (let it = 0; it < N; it++) {
+    runner.runIteration(simPts);
+    for (let t = 0; t < T; t++) {
+      const v = base[t] + simPts[t];
+      sum[t] += v; sumSq[t] += v * v;
+      hist[t][Math.min(BUCKETS - 1, Math.max(0, Math.round(v / BUCKET)))]++;
+    }
+  }
+
+  const out = new Map<string, { mean: number; median: number; stdDev: number }>();
+  for (let t = 0; t < T; t++) {
+    const mean = sum[t] / N;
+    const stdDev = Math.sqrt(Math.max(0, sumSq[t] / N - mean * mean));
+    let cum = 0, median = 0;
+    for (let b = 0; b < BUCKETS; b++) {
+      cum += hist[t][b];
+      if (cum * 2 >= N) { median = b * BUCKET; break; }
+    }
+    out.set(runner.names[t], { mean, median, stdDev });
   }
   return out;
 }

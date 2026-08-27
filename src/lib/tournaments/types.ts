@@ -5,6 +5,8 @@ export type TournamentId = "wc2026" | "cl2627";
 export type TournamentTeam = {
   name: string;
   group: string;
+  /** Klub-Elo — kun CL 26/27; VM-holdene har ingen Elo i kataloget. */
+  elo?: number;
   mean: number;
   median: number;
   stdDev: number;

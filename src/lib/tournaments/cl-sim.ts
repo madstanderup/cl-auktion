@@ -44,6 +44,10 @@ const KO_STAGES: KOStageDef[] = [
 /** Kvartfinaler parres på 1/8-slots; vinderen arver parrets første slot. */
 const QF_SLOT_PAIRS: readonly (readonly [number, number])[] = [[1, 8], [3, 5], [2, 7], [4, 6]];
 const SF_SLOT_PAIRS: readonly (readonly [number, number])[] = [[1, 3], [2, 4]];
+/** 1/8-slot (1-8) → kvartfinale-slot (QF_SLOT_PAIRS' første element). */
+const QF_SLOT_OF_R16: readonly number[] = [0, 1, 2, 3, 4, 3, 4, 2, 1];
+/** Kvartfinale-slot (1-4) → semifinale-slot (SF_SLOT_PAIRS' første element). */
+const SF_SLOT_OF_QF: readonly number[] = [0, 1, 2, 1, 2];
 
 /** Poisson-fordelt måltal (Knuth) — λ er lille (< 3), så løkken er kort. */
 function poisson(lambda: number): number {
@@ -143,6 +147,15 @@ function buildRunner(matches: ScoreMatch[], extraNames: string[]): Runner {
     for (let i = 0; i < T; i++) baseRank[basis[i]] = i;
   }
 
+  // 1/8-slot pr. hold — grundlaget for at placere senere opgør i bracket'et.
+  // Udgangspunktet er den afledte seedning (nr. 1-8 → slot 1-8, playoff-parret
+  // 9/24 → slot 8 ... 16/17 → slot 1); reelle playoff-/1/8-opgør retter det til.
+  const r16SlotOf = new Int32Array(T);
+  for (let t = 0; t < T; t++) {
+    const b = baseRank[t];
+    r16SlotOf[t] = b < 8 ? b + 1 : b < 16 ? 16 - b : b < 24 ? b - 15 : 0;
+  }
+
   // ── Knockout: reelle opgør fra databasen (par, aggregat, afgjort vinder) ──
   const tieMapByStage = new Map<string, Map<string, ActualTie>>();
   const useActual: Record<string, boolean> = {};
@@ -164,11 +177,42 @@ function buildRunner(matches: ScoreMatch[], extraNames: string[]): Runner {
       const w = clTieWinner(st.key, names[tie.a], names[tie.b], matches);
       if (w !== null) tie.winner = idxByName.get(w) ?? -1;
     }
-    // Slots ud fra bedste ligaplacering i opgøret: playoff-parret med den
-    // bedst placerede seed (nr. 9) hører til slot 8 (møder seed 8) osv.
+    // Slots: playoff og 1/8 kan afgøres på ligaplacering — opgørets bedst
+    // placerede hold ER slottet (playoff-parret med nr. 9 hører til slot 8, som
+    // møder seed 8). Fra kvartfinalerne kan begge hold i et opgør derimod være
+    // playoff-hold, så placeringen siger intet om hvor i træet opgøret hører
+    // hjemme; slottet arves i stedet fra holdenes 1/8-slot, ellers ville
+    // semifinalerne blive parret på tværs af bracket-halvdelene.
     const list = [...map.values()].sort((x, y) =>
       Math.min(baseRank[x.a], baseRank[x.b]) - Math.min(baseRank[y.a], baseRank[y.b]));
-    list.forEach((tie, i) => { tie.slot = st.key === "playoff" ? Math.max(1, 8 - i) : i + 1; });
+    list.forEach((tie, i) => {
+      const top = baseRank[tie.a] <= baseRank[tie.b] ? tie.a : tie.b;
+      const r16 = r16SlotOf[top];
+      if (st.key === "playoff") {
+        tie.slot = Math.max(1, 8 - i);
+        r16SlotOf[tie.a] = tie.slot; r16SlotOf[tie.b] = tie.slot;
+      } else if (st.key === "round_of_16") {
+        tie.slot = r16 || i + 1;
+        r16SlotOf[tie.a] = tie.slot; r16SlotOf[tie.b] = tie.slot;
+      } else if (st.key === "quarter_final") {
+        tie.slot = QF_SLOT_OF_R16[r16] || i + 1;
+      } else if (st.key === "semi_final") {
+        tie.slot = SF_SLOT_OF_QF[QF_SLOT_OF_R16[r16]] || i + 1;
+      } else {
+        tie.slot = i + 1;
+      }
+    });
+    // Sikkerhedsnet: falder to slots sammen (opgør i data der ikke følger
+    // bracket'et), bruges den gamle placeringsrækkefølge, så hvert opgør
+    // stadig får sit eget slot.
+    if (new Set(list.map((t) => t.slot)).size !== list.length) {
+      list.forEach((tie, i) => {
+        tie.slot = st.key === "playoff" ? Math.max(1, 8 - i) : i + 1;
+        if (st.key === "playoff" || st.key === "round_of_16") {
+          r16SlotOf[tie.a] = tie.slot; r16SlotOf[tie.b] = tie.slot;
+        }
+      });
+    }
     tieMapByStage.set(st.key, map);
     useActual[st.key] = map.size === st.ties;
   }

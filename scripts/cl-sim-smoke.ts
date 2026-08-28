@@ -183,5 +183,36 @@ function fullLeague(): ScoreMatch[] {
     `${Math.round(bayern)} vs ${Math.round(bayernBase)}`);
 }
 
+// ── Scenario 6: reelle kvartfinaler skal ramme samme bracket som det afledte ──
+// træ. Faldgruben: når begge hold i et kvartfinaleopgør er playoff-hold, siger
+// ligaplaceringen intet om hvilken bracket-halvdel opgøret hører til.
+{
+  const T = (n: number) => names[n - 1]; // T(1) = stærkeste = nr. 1 i tabellen
+  const two = (stage: string, w: number, l: number) => [m(stage, T(w), T(l), 2, 0), m(stage, T(l), T(w), 0, 1)];
+  const matches: ScoreMatch[] = [...fullLeague()];
+  for (let i = 0; i < 8; i++) matches.push(...two("playoff", 9 + i, 24 - i)); // seedet side vinder
+  const poBySlot: Record<number, number> = { 8: 9, 7: 10, 6: 11, 5: 12, 4: 13, 3: 14, 2: 15, 1: 16 };
+  for (let s = 1; s <= 8; s++) {
+    // Seed 2 og seed 7 ryger ud i 1/8 → deres kvartfinale har to playoff-hold
+    if (s === 2 || s === 7) matches.push(...two("round_of_16", poBySlot[s], s));
+    else matches.push(...two("round_of_16", s, poBySlot[s]));
+  }
+  const qfPairs: [number, number][] = [[1, 8], [3, 5], [poBySlot[2], poBySlot[7]], [4, 6]];
+  const withQF = [...matches, ...qfPairs.flatMap(([a, b]) =>
+    [m("quarter_final", T(a), T(b)), m("quarter_final", T(b), T(a))])];
+
+  const N = 20000;
+  const derived = simulateClTeamPoints(matches, { currentByTeam: new Map(), N });
+  const actual = simulateClTeamPoints(withQF, { currentByTeam: new Map(), N });
+  let worst = 0, worstTeam = "";
+  for (const t of [1, 8, 3, 5, 4, 6, poBySlot[2], poBySlot[7]]) {
+    const k = lower(T(t));
+    const d = Math.abs(actual.get(k)! - derived.get(k)!) / derived.get(k)!;
+    if (d > worst) { worst = d; worstTeam = T(t); }
+  }
+  check("S6: reelle kvartfinaler giver samme bracket som det afledte (±5%)", worst < 0.05,
+    worstTeam + " afviger " + (worst * 100).toFixed(1) + "%");
+}
+
 console.log(failures === 0 ? "\nAlle checks bestået ✔" : `\n${failures} check(s) FEJLEDE ✘`);
 process.exit(failures === 0 ? 0 : 1);

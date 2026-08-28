@@ -2,17 +2,29 @@
  * Genererer SIM_STATS-blokken til src/lib/tournaments/cl2627-teams.ts.
  *
  * Kør:  npx tsx scripts/cl-derive-stats.ts
- * og indsæt outputtet som SIM_STATS i holdkataloget. Kør igen når Elo-tallene
- * eller holdlisten ændres — mean/median/stdDev er rene simuleringsresultater,
- * så auktionens xP og fair pris følger den motor spillet scorer efter.
+ * og indsæt outputtet som SIM_STATS i holdkataloget. Kør igen når Elo-tallene,
+ * holdlisten eller kampprogrammet ændres — mean/median/stdDev er rene
+ * simuleringsresultater, så auktionens xP og fair pris følger den motor
+ * spillet scorer efter.
+ *
+ * Simuleringen kører på det trukne kampprogram (cl2627-fixtures.ts), så et hold
+ * med en let lodtrækning også får en højere forventning.
  */
+import type { ScoreMatch } from "../src/lib/scoring";
+import { CL2627_LEAGUE_FIXTURES } from "../src/lib/tournaments/cl2627-fixtures";
 import { CL2627_TEAMS } from "../src/lib/tournaments/cl2627-teams";
 import { simulateClTeamStats } from "../src/lib/tournaments/cl-sim";
 
 const N = Number(process.argv[2] ?? 200_000);
 
+const fixtures: ScoreMatch[] = CL2627_LEAGUE_FIXTURES.map(([home, away]) => ({
+  home_team: home, away_team: away, stage: "league",
+  home_score: null, away_score: null, result_type: null, winner_side: null,
+  status: "scheduled",
+}));
+
 const t0 = Date.now();
-const stats = simulateClTeamStats([], { N });
+const stats = simulateClTeamStats(fixtures, { N });
 console.error(`Simuleret ${N.toLocaleString("da-DK")} turneringer på ${Date.now() - t0} ms\n`);
 
 const rows = CL2627_TEAMS.map((t) => {

@@ -1,5 +1,6 @@
 import { createClient as createAdminClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { CL2627_LEAGUE_FIXTURES } from "@/lib/tournaments/cl2627-fixtures";
 import { findCL2627Team } from "@/lib/tournaments/cl2627-teams";
 import { clCalcTeamPoints } from "@/lib/tournaments/cl-scoring";
 import type { ScoreMatch } from "@/lib/scoring";
@@ -142,6 +143,42 @@ async function recalcClGamePoints(supabase: SupabaseClient, gameId: string): Pro
   await Promise.all(updates);
 }
 
+/**
+ * Opret ligafasens 144 kampe (lodtrækningen i Monaco 27. august 2026) som
+ * "scheduled" for hvert CL-spil der mangler dem — så simulering, kampliste og
+ * stilling har det rigtige program allerede inden resultaterne begynder at
+ * komme ind. Idempotent: en kamp springes over hvis den allerede findes, også
+ * med omvendt hjemme/ude, så syncen ikke kan nå at oprette en dublet.
+ * Datoerne kommer fra syncen når de publiceres.
+ */
+async function seedLeagueFixtures(
+  supabase: SupabaseClient,
+  gameIds: string[],
+  byTeams: Map<string, DbMatch>,
+): Promise<{ inserted: number; error: string | null }> {
+  const rows: Record<string, unknown>[] = [];
+  for (const gameId of gameIds) {
+    for (const [home, away] of CL2627_LEAGUE_FIXTURES) {
+      const h = home.toLowerCase(), a = away.toLowerCase();
+      if (byTeams.has(`${gameId}|league|${h}|${a}`) || byTeams.has(`${gameId}|league|${a}|${h}`)) continue;
+      rows.push({ game_id: gameId, home_team: home, away_team: away, stage: "league", status: "scheduled" });
+    }
+  }
+  if (rows.length === 0) return { inserted: 0, error: null };
+
+  const { data, error } = await supabase
+    .from("wc_matches")
+    .insert(rows)
+    .select("id, game_id, zafronix_match_id, home_team, away_team, stage, status");
+  if (error) return { inserted: 0, error: error.message };
+
+  // Læg de nye rækker i opslaget, så resultat-syncen opdaterer dem i samme kørsel
+  for (const row of (data ?? []) as DbMatch[]) {
+    byTeams.set(`${String(row.game_id)}|${row.stage}|${row.home_team.toLowerCase()}|${row.away_team.toLowerCase()}`, row);
+  }
+  return { inserted: (data ?? []).length, error: null };
+}
+
 export async function GET(req: Request) {
   try { return await runSync(req); }
   catch (err) { return NextResponse.json({ error: `Uventet fejl: ${String(err)}`, stack: err instanceof Error ? err.stack : undefined }, { status: 500 }); }
@@ -168,15 +205,11 @@ async function runSync(_req: Request) {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  // 26/27-datasættet er ikke publiceret endnu — vent stille til det dukker op.
-  if (apiRes.status === 404) {
-    return NextResponse.json({
-      ok: true, synced: 0,
-      message: "CL 26/27-datasæt ikke publiceret hos Zafronix endnu — prøver igen næste kørsel.",
-    });
-  }
+  // 26/27-datasættet er ikke publiceret endnu. Kampprogrammet fra lodtrækningen
+  // oprettes alligevel nedenfor, så kørslen ikke er spildt.
+  const datasetMissing = apiRes.status === 404;
 
-  if (!apiRes.ok) {
+  if (!apiRes.ok && !datasetMissing) {
     const body = await apiRes.text().catch(() => "");
     const isRateLimit = apiRes.status === 429;
     return NextResponse.json({
@@ -187,20 +220,21 @@ async function runSync(_req: Request) {
     }, { status: 502 });
   }
 
-  let apiData: { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];
-  try {
-    apiData = (await apiRes.json()) as { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];
-  } catch (err) {
-    return NextResponse.json({ error: `JSON parse fejl: ${String(err)}` }, { status: 502 });
-  }
-
   let allMatches: ApiMatch[] = [];
-  if (Array.isArray(apiData)) {
-    allMatches = apiData;
-  } else if (Array.isArray((apiData as { data?: ApiMatch[] }).data)) {
-    allMatches = (apiData as { data: ApiMatch[] }).data;
-  } else if (Array.isArray((apiData as { matches?: ApiMatch[] }).matches)) {
-    allMatches = (apiData as { matches: ApiMatch[] }).matches;
+  if (!datasetMissing) {
+    let apiData: { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];
+    try {
+      apiData = (await apiRes.json()) as { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];
+    } catch (err) {
+      return NextResponse.json({ error: `JSON parse fejl: ${String(err)}` }, { status: 502 });
+    }
+    if (Array.isArray(apiData)) {
+      allMatches = apiData;
+    } else if (Array.isArray((apiData as { data?: ApiMatch[] }).data)) {
+      allMatches = (apiData as { data: ApiMatch[] }).data;
+    } else if (Array.isArray((apiData as { matches?: ApiMatch[] }).matches)) {
+      allMatches = (apiData as { matches: ApiMatch[] }).matches;
+    }
   }
 
   const sampleFields = allMatches[0] ? Object.keys(allMatches[0]) : [];
@@ -211,15 +245,12 @@ async function runSync(_req: Request) {
     return stage !== null;
   });
 
-  if (relevant.length === 0) {
-    return NextResponse.json({
-      ok: true, synced: 0,
-      message: "Ingen kampe fundet i kendte stages.",
-      totalFromApi: allMatches.length, sampleFields,
-      unknownStages: [...unknownStages].sort(),
-      sample: allMatches[0] ?? null,
-    });
-  }
+  // Ingen resultater at hente — kampprogrammet oprettes stadig nedenfor.
+  const apiNote = datasetMissing
+    ? "CL 26/27-datasæt ikke publiceret hos Zafronix endnu — kun kampprogrammet er lagt ind."
+    : relevant.length === 0
+      ? "Ingen kampe fundet i kendte stages."
+      : null;
 
   // 2. Hent CL-spil og deres eksisterende kampe
   const supabase = adminClient();
@@ -246,6 +277,9 @@ async function runSync(_req: Request) {
     }
     byTeams.set(`${gid}|${row.stage}|${row.home_team.toLowerCase()}|${row.away_team.toLowerCase()}`, row);
   }
+
+  // 2b. Opret ligafasens kampprogram i de spil der mangler det
+  const seed = await seedLeagueFixtures(supabase, gameIds, byTeams);
 
   // 3. Byg upsert-lister
   const toInsert: Record<string, unknown>[] = [];
@@ -372,6 +406,9 @@ async function runSync(_req: Request) {
   return NextResponse.json({
     ok: true,
     synced,
+    message: apiNote ?? undefined,
+    seededFixtures: seed.inserted,
+    seedError: seed.error ?? undefined,
     inserted: toInsert.length,
     updated: toUpdate.length,
     totalFromApi: allMatches.length,

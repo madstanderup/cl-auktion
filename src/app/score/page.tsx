@@ -176,7 +176,7 @@ export default function ScorePage() {
 
   if (!gameId || !playerId) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#030711] px-6 text-slate-100">
+      <div className="flex min-h-screen flex-col items-center justify-center cl-field px-6 text-slate-100">
         <Trophy className="mb-4 size-10 text-amber-300/80" aria-hidden />
         <p className="max-w-md text-center text-slate-400">
           Her vises din stilling for det spil du er tilmeldt. Brug samme browser som da du joined, eller gå til forsiden
@@ -191,14 +191,14 @@ export default function ScorePage() {
 
   if (loading && !me && !error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-100">
+      <div className="flex min-h-screen items-center justify-center cl-field text-slate-100">
         <Loader2 className="size-8 animate-spin text-amber-400/80" aria-label="Indlæser" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#030711] text-slate-100">
+    <div className="min-h-screen cl-field text-slate-100">
       <header className="border-b border-white/[0.08] bg-slate-950/40 px-4 py-4 backdrop-blur-md sm:px-6">
         <div className="mx-auto flex max-w-2xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">

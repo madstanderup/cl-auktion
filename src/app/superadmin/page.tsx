@@ -220,7 +220,7 @@ export default function SuperAdminPage() {
 
   if (!authChecked) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-600">
+      <div className="flex min-h-screen items-center justify-center cl-field text-slate-600">
         <Loader2 className="size-6 animate-spin" />
       </div>
     );
@@ -228,14 +228,14 @@ export default function SuperAdminPage() {
 
   if (currentEmail !== SUPERADMIN_EMAIL) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-400">
+      <div className="flex min-h-screen items-center justify-center cl-field text-slate-400">
         Ingen adgang.
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#030711] px-4 py-10 text-slate-100">
+    <div className="min-h-screen cl-field px-4 py-10 text-slate-100">
       <div className="mx-auto w-full max-w-3xl space-y-8">
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">

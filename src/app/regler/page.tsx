@@ -5,7 +5,7 @@ import { ArrowLeft, Trophy, Gavel, Star, Users, Zap } from "lucide-react";
 
 export default function ReglerPage() {
   return (
-    <div className="min-h-screen bg-[#030711] text-slate-100">
+    <div className="min-h-screen cl-field text-slate-100">
       {/* Header */}
       <header className="border-b border-white/[0.08] bg-slate-950/40 px-4 py-4 backdrop-blur-md sm:px-6">
         <div className="mx-auto flex max-w-2xl items-center gap-4">

@@ -344,7 +344,7 @@ export default function SummaryPage() {
   const totalCoins = results.reduce((s, p) => s + p.coinsSpent, 0);
 
   return (
-    <div className="min-h-screen bg-[#060d1a] text-slate-100">
+    <div className="min-h-screen cl-field text-slate-100">
       {/* Baggrunds-glow */}
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_100%_50%_at_50%_0%,rgba(30,64,175,0.25),transparent_60%)]" />
 

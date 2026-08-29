@@ -65,7 +65,7 @@ export default function GameLayout({ children }: { children: React.ReactNode }) 
 
   if (status === "checking") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#030711]">
+      <div className="flex min-h-screen items-center justify-center cl-field">
         <Loader2 className="size-6 animate-spin text-amber-400/60" />
       </div>
     );
@@ -73,7 +73,7 @@ export default function GameLayout({ children }: { children: React.ReactNode }) 
 
   if (status === "denied") {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#030711] text-slate-400">
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 cl-field text-slate-400">
         <ShieldOff className="size-10 text-slate-600" />
         <p className="text-sm">Du har ikke adgang til dette spil.</p>
         <button

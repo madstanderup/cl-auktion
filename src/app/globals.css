@@ -48,6 +48,42 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* ── Champions League-stemning ──────────────────────────────────────────
+   Nattehimmel-navy som fælles bund, sølvblå typografi og stjerneguld til
+   trofæ, mønter og vindere. Slate- og amber-skalaerne tones om her, så
+   alle eksisterende utilities på tværs af siderne følger med automatisk
+   i stedet for at hver enkelt side skal skrives om.
+   ─────────────────────────────────────────────────────────────────────── */
+@theme {
+  /* Nattehimmel i stedet for neutral grå-blå */
+  --color-slate-50:  #f2f5fc;
+  --color-slate-100: #e6ecfa;
+  --color-slate-200: #ccd8f2;
+  --color-slate-300: #a9bce6;
+  --color-slate-400: #7f97cc;
+  --color-slate-500: #6479ad;
+  --color-slate-600: #4a5c8a;
+  --color-slate-700: #35446b;
+  --color-slate-800: #22304f;
+  --color-slate-900: #131f3d;
+  --color-slate-950: #0a1329;
+
+  /* Stjerneguld — køligere og mindre orange end Tailwinds amber */
+  --color-amber-100: #fef4d6;
+  --color-amber-200: #fde9b0;
+  --color-amber-300: #fcd77a;
+  --color-amber-400: #f7c14b;
+  --color-amber-500: #eda52c;
+
+  /* CL-blå til struktur, glød og accenter */
+  --color-cl-abyss:  #050d24;
+  --color-cl-night:  #0b1636;
+  --color-cl-navy:   #16265a;
+  --color-cl-blue:   #2b5fd9;
+  --color-cl-bright: #4d8ff5;
+  --color-cl-silver: #c9d6ee;
+}
+
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -84,37 +120,37 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: #050d24;
+  --foreground: #e6ecfa;
+  --card: #0b1636;
+  --card-foreground: #e6ecfa;
+  --popover: #0b1636;
+  --popover-foreground: #e6ecfa;
+  --primary: #2b5fd9;
+  --primary-foreground: #ffffff;
+  --secondary: #16265a;
+  --secondary-foreground: #dee7fb;
+  --muted: #13204d;
+  --muted-foreground: #93a4cc;
+  --accent: #1c3272;
+  --accent-foreground: #eaf0ff;
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --border: rgb(140 170 230 / 0.18);
+  --input: rgb(140 170 230 / 0.24);
+  --ring: #4d8ff5;
+  --chart-1: #4d8ff5;
+  --chart-2: #2b5fd9;
+  --chart-3: #f7c14b;
+  --chart-4: #16265a;
+  --chart-5: #a9bce6;
+  --sidebar: #0b1636;
+  --sidebar-foreground: #e6ecfa;
+  --sidebar-primary: #2b5fd9;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #16265a;
+  --sidebar-accent-foreground: #dee7fb;
+  --sidebar-border: rgb(140 170 230 / 0.18);
+  --sidebar-ring: #4d8ff5;
 }
 
 @layer base {
@@ -130,5 +166,83 @@
   select option {
     background-color: #ffffff;
     color: #000000;
+  }
+}
+
+:root {
+  /* Lysning fra toppen som et oplyst stadion, dybere navy mod hjørnerne */
+  --cl-glow:
+    radial-gradient(ellipse 120% 78% at 50% -22%, rgb(43 95 217 / 0.38), transparent 62%),
+    radial-gradient(ellipse 95% 60% at 105% 100%, rgb(22 38 90 / 0.55), transparent 58%),
+    radial-gradient(ellipse 70% 45% at -5% 18%, rgb(28 50 114 / 0.45), transparent 62%);
+
+  /* Stjernehimmel — små hårde prikker plus lidt glød på de klareste */
+  --cl-starfield:
+    radial-gradient(1px 1px at 12% 8%, rgb(255 255 255 / 0.45), transparent),
+    radial-gradient(2px 2px at 78% 15%, rgb(255 255 255 / 0.8), transparent),
+    radial-gradient(9px 9px at 78% 15%, rgb(201 214 238 / 0.16), transparent),
+    radial-gradient(1px 1px at 34% 22%, rgb(255 255 255 / 0.32), transparent),
+    radial-gradient(1px 1px at 91% 31%, rgb(255 255 255 / 0.45), transparent),
+    radial-gradient(2px 2px at 56% 18%, rgb(255 255 255 / 0.65), transparent),
+    radial-gradient(8px 8px at 56% 18%, rgb(201 214 238 / 0.14), transparent),
+    radial-gradient(1px 1px at 8% 42%, rgb(255 255 255 / 0.36), transparent),
+    radial-gradient(2px 2px at 62% 48%, rgb(255 255 255 / 0.5), transparent),
+    radial-gradient(1px 1px at 41% 55%, rgb(255 255 255 / 0.26), transparent),
+    radial-gradient(1px 1px at 88% 61%, rgb(255 255 255 / 0.45), transparent),
+    radial-gradient(2px 2px at 19% 67%, rgb(255 255 255 / 0.42), transparent),
+    radial-gradient(1px 1px at 72% 73%, rgb(255 255 255 / 0.3), transparent),
+    radial-gradient(1px 1px at 45% 12%, rgb(255 255 255 / 0.42), transparent),
+    radial-gradient(2px 2px at 52% 84%, rgb(255 255 255 / 0.5), transparent),
+    radial-gradient(1px 1px at 28% 91%, rgb(255 255 255 / 0.26), transparent),
+    radial-gradient(1px 1px at 93% 6%, rgb(255 255 255 / 0.4), transparent),
+    radial-gradient(1px 1px at 5% 79%, rgb(255 255 255 / 0.34), transparent),
+    radial-gradient(1px 1px at 66% 94%, rgb(255 255 255 / 0.3), transparent);
+}
+
+@layer components {
+  /* Sidebaggrund: stjernehimmel over navy-glød. Erstatter det gamle flade
+     #030711 og bruges på tværs af alle sider. */
+  .cl-field {
+    background-color: var(--color-cl-abyss);
+    background-image: var(--cl-starfield), var(--cl-glow);
+    background-repeat: no-repeat;
+    /* Bevidst IKKE background-attachment: fixed — det hakker og udebliver
+       i Safari på iOS, og spillerne byder fra telefonen. */
+  }
+
+  /* Glasplade i navy — til kort og paneler der skal løfte sig fra himlen. */
+  .cl-panel {
+    border: 1px solid rgb(140 170 230 / 0.16);
+    background: linear-gradient(to bottom, rgb(19 31 61 / 0.78), rgb(10 19 41 / 0.82));
+    box-shadow:
+      0 1px 0 0 rgb(255 255 255 / 0.05) inset,
+      0 20px 45px -25px rgb(3 8 24 / 0.9);
+    backdrop-filter: blur(12px);
+  }
+
+  /* Tynd guldstribe — topkant på "vinder"- og finaleflader. */
+  .cl-goldline {
+    background-image: linear-gradient(
+      to right,
+      transparent,
+      var(--color-amber-300),
+      transparent
+    );
+  }
+}
+
+@keyframes cl-pulse {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+
+.cl-pulse {
+  animation: cl-pulse 4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-pulse {
+    animation: none;
+    opacity: 1;
   }
 }

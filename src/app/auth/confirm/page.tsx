@@ -69,7 +69,7 @@ function ConfirmInner() {
   }, [router, searchParams]);
 
   return (
-    <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#030711] px-5 text-slate-100">
+    <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden cl-field px-5 text-slate-100">
       <div
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent_55%)]"
         aria-hidden
@@ -137,7 +137,7 @@ function ConfirmInner() {
 export default function AuthConfirmPage() {
   return (
     <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-[#030711]">
+      <div className="flex min-h-screen items-center justify-center cl-field">
         <Loader2 className="size-8 animate-spin text-amber-400/60" />
       </div>
     }>

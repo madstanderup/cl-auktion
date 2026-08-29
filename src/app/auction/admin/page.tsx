@@ -759,7 +759,7 @@ export default function AuctionAdminPage() {
 
   if (!sessionReady) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#030711] text-slate-100">
+      <div className="flex min-h-screen items-center justify-center cl-field text-slate-100">
         <Loader2 className="size-8 animate-spin text-amber-400/80" aria-label="Indlæser" />
       </div>
     );
@@ -767,7 +767,7 @@ export default function AuctionAdminPage() {
 
   if (!session) {
     return (
-      <div className="min-h-screen bg-[#030711] px-4 py-10 text-slate-100">
+      <div className="min-h-screen cl-field px-4 py-10 text-slate-100">
         <div className="mx-auto w-full max-w-lg rounded-2xl border border-white/10 bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/40 backdrop-blur">
           <div className="flex items-center gap-3">
             <ShieldCheck className="size-5 text-amber-300" />
@@ -880,7 +880,7 @@ export default function AuctionAdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#030711] px-4 py-10 text-slate-100">
+    <div className="min-h-screen cl-field px-4 py-10 text-slate-100">
       <div className="mx-auto w-full max-w-2xl rounded-2xl border border-white/10 bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/40 backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">

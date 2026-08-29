@@ -320,7 +320,7 @@ export default function PointsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#030711] text-slate-100">
+    <div className="min-h-screen cl-field text-slate-100">
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
         {/* Header */}
         <div className="mb-6 flex flex-wrap items-center gap-4">

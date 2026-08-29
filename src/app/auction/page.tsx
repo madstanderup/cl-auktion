@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Gavel, Loader2, User } from "lucide-react";
 
 import { AuctionAdminDock } from "@/components/auction-admin-dock";
+import { Starball } from "@/components/starball";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { GameAdminSession } from "@/lib/player-storage";
@@ -788,7 +789,7 @@ export default function AuctionPage() {
 
   if (!gameId) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#030711] px-6 text-slate-100">
+      <div className="flex min-h-screen flex-col items-center justify-center cl-field px-6 text-slate-100">
         <p className="max-w-md text-center text-slate-400">
           Ingen aktiv auktion valgt. Gå til forsiden og tilslut med invitationskode fra værten.
         </p>
@@ -801,7 +802,7 @@ export default function AuctionPage() {
 
   if (!playerLoading && !playerId) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#030711] px-6 text-slate-100">
+      <div className="flex min-h-screen flex-col items-center justify-center cl-field px-6 text-slate-100">
         <p className="text-center text-slate-400">Ingen spiller fundet. Opret dig fra forsiden.</p>
         <Link href="/" className={cn(buttonVariants({ variant: "outline" }), "mt-6")}>
           Til forsiden
@@ -812,7 +813,7 @@ export default function AuctionPage() {
 
   if (!playerLoading && playerId && !player) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#030711] px-6 text-slate-100">
+      <div className="flex min-h-screen flex-col items-center justify-center cl-field px-6 text-slate-100">
         <p className="max-w-md text-center text-slate-400">
           Kunne ikke hente spilleren. Tjek at ID i browseren matcher databasen, eller opret dig igen.
         </p>
@@ -825,16 +826,13 @@ export default function AuctionPage() {
 
   return (
     <>
-    <div className="relative isolate min-h-screen overflow-hidden bg-[#030711] text-slate-100">
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_100%_60%_at_50%_-15%,rgba(59,130,246,0.18),transparent_50%)]"
-        aria-hidden
-      />
-
+    <div className="relative isolate min-h-screen overflow-hidden cl-field text-slate-100">
       <header className="relative z-10 border-b border-white/[0.08] bg-slate-950/40 backdrop-blur-md">
+        {/* Guldstribe langs headeren — turneringens finalefølelse */}
+        <div className="cl-goldline h-px w-full opacity-40" aria-hidden />
         <div className="mx-auto flex max-w-3xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-xl bg-amber-400/15 text-amber-300">
+            <div className="relative flex size-10 items-center justify-center rounded-xl border border-white/10 bg-cl-navy/40 text-amber-300">
               <Gavel className="size-5" aria-hidden />
             </div>
             <div>
@@ -1070,7 +1068,14 @@ export default function AuctionPage() {
             ) : null}
           </div>
         ) : (
-          <article className={cn("w-full rounded-2xl border border-white/[0.1] bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/50 backdrop-blur-md", "ring-1 ring-inset ring-white/[0.05]")}>
+          <article className={cn("relative isolate w-full overflow-hidden rounded-2xl p-8 cl-panel")}>
+            {/* Stjernebolden som vandmærke bag runden */}
+            <Starball
+              className={cn(
+                "pointer-events-none absolute -right-8 -top-8 -z-10 size-40 opacity-[0.07]",
+                status === "bidding" || status === "tie_breaker" ? "cl-pulse" : "",
+              )}
+            />
             {status === "waiting" && (
               <div className="text-center">
                 <p className="text-sm font-medium leading-relaxed text-slate-300">

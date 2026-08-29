@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, ShieldCheck, Sparkles, Trophy, Users, ChevronRight } from "lucide-react";
 
 import Link from "next/link";
+import { Starball } from "@/components/starball";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
@@ -20,23 +21,6 @@ import { getTournament, calcPointsForTournament, eliminatedForTournament, countA
 
 type PointMatch = ScoreMatch;
 
-const STAR_POSITIONS: ReadonlyArray<{ top: string; left: string; opacity: number; size: number }> = [
-  { top: "8%", left: "12%", opacity: 0.35, size: 1 },
-  { top: "15%", left: "78%", opacity: 0.5, size: 2 },
-  { top: "22%", left: "34%", opacity: 0.25, size: 1 },
-  { top: "31%", left: "91%", opacity: 0.4, size: 1 },
-  { top: "18%", left: "56%", opacity: 0.55, size: 2 },
-  { top: "42%", left: "8%", opacity: 0.3, size: 1 },
-  { top: "48%", left: "62%", opacity: 0.45, size: 2 },
-  { top: "55%", left: "41%", opacity: 0.2, size: 1 },
-  { top: "61%", left: "88%", opacity: 0.5, size: 1 },
-  { top: "67%", left: "19%", opacity: 0.35, size: 2 },
-  { top: "73%", left: "72%", opacity: 0.28, size: 1 },
-  { top: "12%", left: "45%", opacity: 0.4, size: 1 },
-  { top: "84%", left: "52%", opacity: 0.5, size: 2 },
-  { top: "91%", left: "28%", opacity: 0.22, size: 1 },
-  { top: "6%", left: "93%", opacity: 0.38, size: 1 },
-];
 
 type MyGame = {
   player_id: string;
@@ -309,29 +293,12 @@ export default function Home() {
   }
 
   return (
-    <div className="relative isolate flex min-h-screen flex-col overflow-hidden bg-[#030711] text-slate-100">
+    <div className="relative isolate flex min-h-screen flex-col overflow-hidden cl-field text-slate-100">
+      {/* Stjernehimlen kommer fra .cl-field — her lægges kun bundfaden på. */}
       <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent_55%),radial-gradient(ellipse_90%_50%_at_100%_50%,rgba(30,58,138,0.2),transparent_50%),radial-gradient(ellipse_80%_40%_at_0%_80%,rgba(15,23,42,0.9),transparent_45%)]"
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,transparent_35%,oklch(0.108_0.055_268/0.9))]"
         aria-hidden
       />
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,transparent,rgba(3,7,17,0.85))]" aria-hidden />
-
-      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-        {STAR_POSITIONS.map((s, i) => (
-          <span
-            key={i}
-            className="absolute rounded-full bg-white"
-            style={{
-              top: s.top,
-              left: s.left,
-              width: s.size,
-              height: s.size,
-              opacity: s.opacity,
-              boxShadow: s.size > 1 ? "0 0 6px 1px rgba(255,255,255,0.35)" : undefined,
-            }}
-          />
-        ))}
-      </div>
 
       {/*
         ── CHAMPIONS LEAGUE-REGLER (gem til næste CL-sæson) ──────────────────
@@ -345,12 +312,15 @@ export default function Home() {
         ──────────────────────────────────────────────────────────────────────
       */}
 
-      <header className="relative z-10 flex items-center justify-center gap-2 pt-10 pb-4">
-        <Sparkles className="size-5 text-amber-300/90" strokeWidth={1.75} />
-        <span className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">
-          VM 2026
-        </span>
-        <Sparkles className="size-5 text-amber-300/90" strokeWidth={1.75} />
+      <header className="relative z-10 flex flex-col items-center gap-3 pt-10 pb-4">
+        <Starball className="size-14 drop-shadow-[0_0_24px_oklch(0.52_0.19_262/0.55)]" />
+        <div className="flex items-center gap-3">
+          <span className="h-px w-8 bg-gradient-to-r from-transparent to-slate-600" aria-hidden />
+          <span className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">
+            VM 2026
+          </span>
+          <span className="h-px w-8 bg-gradient-to-l from-transparent to-slate-600" aria-hidden />
+        </div>
       </header>
 
       <main className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col px-5 pb-16 pt-2 sm:px-8">

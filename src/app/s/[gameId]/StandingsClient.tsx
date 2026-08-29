@@ -105,7 +105,7 @@ export default function StandingsClient({ gameId }: { gameId: string }) {
   }
 
   return (
-    <div className="min-h-screen bg-[#030711] text-slate-100">
+    <div className="min-h-screen cl-field text-slate-100">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_100%_50%_at_50%_0%,rgba(30,64,175,0.22),transparent_60%)]" />
       <main className="relative mx-auto max-w-md px-4 py-10">
         {loading ? (

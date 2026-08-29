@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2 } from "lucide-react";
+
+import { Starball } from "@/components/starball";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
@@ -42,7 +44,7 @@ export default function RegisterPage() {
 
   if (done) {
     return (
-      <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#030711] px-5 text-slate-100">
+      <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden cl-field px-5 text-slate-100">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent_55%)]" aria-hidden />
         <div className="relative w-full max-w-sm rounded-2xl border border-white/10 bg-slate-950/60 p-8 text-center shadow-2xl backdrop-blur">
           <p className="text-2xl">📬</p>
@@ -60,14 +62,13 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#030711] px-5 text-slate-100">
+    <div className="relative isolate flex min-h-screen flex-col items-center justify-center overflow-hidden cl-field px-5 text-slate-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(59,130,246,0.22),transparent_55%)]" aria-hidden />
 
       <div className="relative w-full max-w-sm">
-        <div className="mb-8 flex items-center justify-center gap-2">
-          <Sparkles className="size-5 text-amber-300/90" strokeWidth={1.75} />
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <Starball className="size-12 drop-shadow-[0_0_20px_rgb(43_95_217/0.5)]" />
           <span className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">VM 2026</span>
-          <Sparkles className="size-5 text-amber-300/90" strokeWidth={1.75} />
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/40 backdrop-blur">

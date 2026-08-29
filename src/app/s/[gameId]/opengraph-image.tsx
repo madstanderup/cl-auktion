@@ -23,7 +23,7 @@ export default async function Image({ params }: { params: Promise<{ gameId: stri
           height: "100%",
           display: "flex",
           flexDirection: "column",
-          background: "linear-gradient(135deg, #030711 0%, #0b1733 60%, #030711 100%)",
+          background: "linear-gradient(135deg, #050d24 0%, #16265a 55%, #050d24 100%)",
           color: "white",
           padding: "64px 72px",
           fontFamily: "sans-serif",
@@ -31,11 +31,11 @@ export default async function Image({ params }: { params: Promise<{ gameId: stri
       >
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 8 }}>
           <span style={{ fontSize: 40 }}>🏆</span>
-          <span style={{ fontSize: 26, letterSpacing: 8, color: "#94a3b8", textTransform: "uppercase" }}>
+          <span style={{ fontSize: 26, letterSpacing: 8, color: "#7f97cc", textTransform: "uppercase" }}>
             Stilling
           </span>
         </div>
-        <div style={{ fontSize: 64, fontWeight: 800, marginBottom: 36, color: "#fde68a" }}>{label}</div>
+        <div style={{ fontSize: 64, fontWeight: 800, marginBottom: 36, color: "#fcd77a" }}>{label}</div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {rows.map((s, i) => (
@@ -45,17 +45,17 @@ export default async function Image({ params }: { params: Promise<{ gameId: stri
                 display: "flex",
                 alignItems: "center",
                 gap: 20,
-                background: i === 0 ? "rgba(251,191,36,0.12)" : "rgba(255,255,255,0.04)",
+                background: i === 0 ? "rgba(252,215,122,0.14)" : "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.08)",
                 borderRadius: 16,
                 padding: "16px 28px",
               }}
             >
               <span style={{ fontSize: 36, width: 56 }}>{MEDALS[i] ?? `${i + 1}.`}</span>
-              <span style={{ fontSize: 38, fontWeight: 700, flex: 1, color: i === 0 ? "#fde68a" : "white" }}>
+              <span style={{ fontSize: 38, fontWeight: 700, flex: 1, color: i === 0 ? "#fcd77a" : "white" }}>
                 {s.name}
               </span>
-              <span style={{ fontSize: 30, color: "#94a3b8" }}>{s.teams} hold</span>
+              <span style={{ fontSize: 30, color: "#7f97cc" }}>{s.teams} hold</span>
               <span style={{ fontSize: 40, fontWeight: 800, color: "#fbbf24", width: 200, textAlign: "right" }}>
                 {s.points.toLocaleString("da-DK")} pt
               </span>

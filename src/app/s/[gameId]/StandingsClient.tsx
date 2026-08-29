@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2, Trophy } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { type ScoreMatch } from "@/lib/scoring";
-import { getTournamentForGame, calcPointsForTournament, matchPointsForTournament } from "@/lib/tournaments";
+import { getTournamentForGame, calcPointsForTournament, matchPointsForTournament, CURRENT_TOURNAMENT } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
 type MatchRow = ScoreMatch & { match_date: string | null };
@@ -22,12 +22,15 @@ export default function StandingsClient({ gameId }: { gameId: string }) {
   const [dayLabel, setDayLabel] = useState<string | null>(null);
   const [results, setResults] = useState<ResultLine[]>([]);
   const [topScorer, setTopScorer] = useState<{ name: string; pts: number } | null>(null);
+  // Denne side hoerer til ET spil — brug spillets egen turnering, ikke den aktuelle.
+  const [tournamentLabel, setTournamentLabel] = useState(CURRENT_TOURNAMENT.label);
 
   useEffect(() => { if (gameId) void load(); }, [gameId]);
 
   async function load() {
     setLoading(true);
     const cfg = await getTournamentForGame(gameId);
+    setTournamentLabel(cfg.label);
     const findTeam = cfg.findTeam;
     const [gameRes, playersRes, gtRes, teamsRes, matchesRes] = await Promise.all([
       supabase.from("games").select("label, invite_code").eq("id", gameId).maybeSingle(),
@@ -162,7 +165,7 @@ export default function StandingsClient({ gameId }: { gameId: string }) {
               </div>
             )}
 
-            <p className="mt-8 text-center text-[0.65rem] text-slate-600">VM 2026 Auktion</p>
+            <p className="mt-8 text-center text-[0.65rem] text-slate-600">{tournamentLabel} Auktion</p>
           </>
         )}
       </main>

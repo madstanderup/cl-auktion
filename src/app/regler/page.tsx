@@ -3,6 +3,17 @@
 import Link from "next/link";
 import { ArrowLeft, Trophy, Gavel, Star, Users, Zap } from "lucide-react";
 
+import { CURRENT_TOURNAMENT } from "@/lib/tournaments";
+
+const T = CURRENT_TOURNAMENT;
+const Q = T.scoring.qualOnWin;
+
+/** Samlet kvalifikations-bonus ad vejen — udregnet så tallene ikke kan drifte
+ *  fra pointmotoren hvis reglerne justeres. */
+const SEMI_BONUS = T.scoring.groupQualBonus + Q.round_of_16 + Q.quarter_final;
+const RUNNER_UP_BONUS = SEMI_BONUS + Q.semi_final;
+const CHAMPION_BONUS = RUNNER_UP_BONUS + Q.final;
+
 export default function ReglerPage() {
   return (
     <div className="min-h-screen cl-field text-slate-100">
@@ -26,12 +37,12 @@ export default function ReglerPage() {
             </div>
             <div>
               <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-amber-400/70">Om spillet</p>
-              <h1 className="text-xl font-bold text-white">VM Auktion & Fantasy</h1>
+              <h1 className="text-xl font-bold text-white">{T.name} Auktion &amp; Fantasy</h1>
             </div>
           </div>
           <div className="space-y-3 text-sm leading-relaxed text-slate-300">
             <p>
-              Dyst i fodboldviden og forudsigelser igennem en auktion, hvor det gælder om at samle point efter hvordan dine hold klarer sig — alle 48 hold bliver fordelt igennem en auktion hvor hver spiller har 1.000 mønter. Der bydes blindt på holdene, og den der byder mest får holdet og bliver fratrukket sine mønter. Holdene allokerer derefter point til den enkelte spiller, baseret på de enkelte kampe og på hvor langt de når i turneringen.
+              Dyst i fodboldviden og forudsigelser igennem en auktion, hvor det gælder om at samle point efter hvordan dine hold klarer sig — alle {T.teamCount} {T.teamNoun} bliver fordelt igennem en auktion hvor hver spiller har 1.000 mønter. Der bydes blindt på holdene, og den der byder mest får holdet og bliver fratrukket sine mønter. Holdene allokerer derefter point til den enkelte spiller, baseret på de enkelte kampe og på hvor langt de når i turneringen.
             </p>
             <p>
               Strategien er todelt: køb hold du tror rækker langt i turneringen — sats enten på mange hold der scorer lidt point, eller få hold der scorer mange point.
@@ -57,7 +68,7 @@ export default function ReglerPage() {
                 <li className="flex gap-2"><span className="text-blue-400 mt-0.5">•</span><span>Du kan ikke byde mere end du har tilbage på kontoen.</span></li>
               </ul>
               <div className="rounded-lg bg-blue-500/10 border border-blue-400/20 px-4 py-3 mt-2">
-                <p className="text-xs text-blue-200/80"><span className="font-semibold">Eksempel:</span> Der er 4 spillere. Argentina sættes på auktion. Mads byder 300, Louise byder 250, Søren byder 300, Anne byder 180. Mads og Søren bød begge 300 — de går i om-auktion, og vinderen overtager Argentina til det endelige bud.</p>
+                <p className="text-xs text-blue-200/80"><span className="font-semibold">Eksempel:</span> Der er 4 spillere. Real Madrid sættes på auktion. Mads byder 300, Louise byder 250, Søren byder 300, Anne byder 180. Mads og Søren bød begge 300 — de går i om-auktion, og vinderen overtager Real Madrid til det endelige bud.</p>
               </div>
             </div>
           </section>
@@ -70,59 +81,79 @@ export default function ReglerPage() {
             </div>
             <div className="px-5 py-4 space-y-5 text-sm text-slate-300">
 
-              {/* Gruppe */}
+              {/* Ligafase */}
               <div>
-                <h3 className="font-semibold text-white mb-2">Gruppespil</h3>
+                <h3 className="font-semibold text-white mb-2">
+                  Ligafasen <span className="text-slate-400 font-normal">({T.teamCount} hold, {T.leagueRounds} kampe hver)</span>
+                </h3>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                    <span>Sejr (i ordinær tid)</span>
-                    <span className="font-bold text-amber-300">+150 pt</span>
+                    <span>Sejr</span>
+                    <span className="font-bold text-amber-300">+{T.scoring.groupWin} pt</span>
                   </div>
                   <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
                     <span>Uafgjort</span>
-                    <span className="font-bold text-amber-300">+50 pt</span>
+                    <span className="font-bold text-amber-300">+{T.scoring.groupDraw} pt</span>
                   </div>
                   <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
                     <span>Nederlag</span>
                     <span className="text-slate-500">0 pt</span>
                   </div>
                 </div>
+                <p className="text-xs text-slate-500 mt-2 ml-1">
+                  Alle møder {T.leagueRounds} forskellige modstandere i én samlet tabel — ingen grupper.
+                  Nr. 1-8 går direkte i 1/8-finalen, nr. 9-24 skal en tur i playoff, og nr. 25-36 er ude.
+                </p>
+              </div>
+
+              {/* Playoff */}
+              <div className="rounded-xl border border-blue-400/25 bg-blue-500/10 px-4 py-3">
+                <h3 className="font-semibold text-white mb-1">Playoff (1/16) tæller ikke med</h3>
+                <p className="text-xs text-blue-200/80">
+                  Playoff-opgørene giver hverken kamppoint eller bonus. De afgør kun hvem der følger
+                  med top 8 videre i 1/8-finalen — så det er ingen ulempe at eje et hold der gik
+                  direkte videre.
+                </p>
               </div>
 
               {/* Knockout */}
               <div>
-                <h3 className="font-semibold text-white mb-2">Knockout-runder (1/16, 1/8, KV, SF, Finale)</h3>
+                <h3 className="font-semibold text-white mb-2">Knockout-runder (1/8, KV, SF, Finale)</h3>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
-                    <span>Sejr i ordinær tid</span>
-                    <span className="font-bold text-amber-300">+150 pt</span>
+                    <span>Sejr i en kamp</span>
+                    <span className="font-bold text-amber-300">+{T.scoring.knockoutWin} pt</span>
                   </div>
                   <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
                     <span>Uafgjort i ordinær spilletid (begge hold)</span>
-                    <span className="font-bold text-amber-300">+50 pt</span>
+                    <span className="font-bold text-amber-300">+{T.scoring.etBase} pt</span>
                   </div>
                   <div className="flex items-center justify-between rounded-lg bg-white/[0.03] px-3 py-2">
                     <span>Vinder i forlænget/straffe (kun vinderen)</span>
-                    <span className="font-bold text-amber-300">+50 pt</span>
+                    <span className="font-bold text-amber-300">+{T.scoring.etWin} pt</span>
                   </div>
                 </div>
-                <p className="text-xs text-slate-500 mt-2 ml-1">Dvs. vinderen på forlænget/straffe: 100 pt i alt. Taberen: 50 pt i alt.</p>
+                <p className="text-xs text-slate-500 mt-2 ml-1">
+                  1/8, kvart og semi spilles som <strong className="text-slate-300">dobbeltopgør</strong> —
+                  point gives pr. kamp, så begge kampe tæller. Finalen er én kamp. Forlænget/straffe
+                  kan kun forekomme i det afgørende opgør: vinderen får {T.scoring.etBase + T.scoring.etWin} pt i alt, taberen {T.scoring.etBase} pt.
+                </p>
               </div>
 
               {/* Kvalifikations-bonus */}
               <div>
                 <h3 className="font-semibold text-white mb-2">Kvalifikations-bonus <span className="text-slate-400 font-normal">(tildeles løbende)</span></h3>
                 <p className="text-xs text-slate-400 mb-2">
-                  Hver gang dit hold kvalificerer sig til en runde, får du point med det samme —
-                  efter gruppespillet, og derefter ved hver knockout-sejr:
+                  Hver gang dit hold kvalificerer sig til en ny runde, får du point med det samme.
+                  Bonussen gives for at vinde <strong className="text-slate-300">opgøret</strong> — ikke
+                  pr. kamp:
                 </p>
                 <div className="space-y-1.5">
                   {[
-                    { stage: "Går videre fra gruppespillet (når alle grupper er slut)", pts: 100 },
-                    { stage: "Vinder 1/16-finalen → kvalificeret til 1/8", pts: 100 },
-                    { stage: "Vinder 1/8-finalen → kvalificeret til kvartfinale", pts: 200 },
-                    { stage: "Vinder kvartfinalen → kvalificeret til semifinale", pts: 200 },
-                    { stage: "Vinder semifinalen → kvalificeret til finalen", pts: 200 },
+                    { stage: "Kvalificeret til 1/8-finalen (top 8 i ligafasen eller sejr i playoff)", pts: T.scoring.groupQualBonus },
+                    { stage: "Vinder 1/8-opgøret → kvalificeret til kvartfinalen", pts: T.scoring.qualOnWin.round_of_16 },
+                    { stage: "Vinder kvartfinalen → kvalificeret til semifinalen", pts: T.scoring.qualOnWin.quarter_final },
+                    { stage: "Vinder semifinalen → kvalificeret til finalen", pts: T.scoring.qualOnWin.semi_final },
                   ].map(({ stage, pts }) => (
                     <div key={stage} className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.03] px-3 py-2">
                       <span>{stage}</span>
@@ -131,8 +162,9 @@ export default function ReglerPage() {
                   ))}
                 </div>
                 <p className="text-xs text-slate-500 mt-2 ml-1">
-                  Bonusserne kommer oven i kamppointene (sejr +150 osv.). Et hold der fx ryger ud i
-                  kvartfinalen har samlet 100 + 100 + 200 = 400 pt i kvalifikations-bonus undervejs.
+                  Bonusserne kommer oven i kamppointene (sejr +{T.scoring.knockoutWin} osv.). Et hold der fx ryger ud i
+                  kvartfinalen har samlet {T.scoring.groupQualBonus} + {T.scoring.qualOnWin.round_of_16} ={" "}
+                  {T.scoring.groupQualBonus + T.scoring.qualOnWin.round_of_16} pt i kvalifikations-bonus undervejs.
                 </p>
               </div>
 
@@ -141,50 +173,51 @@ export default function ReglerPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Trophy className="size-4 text-amber-300" />
-                    <span className="font-semibold text-white">Verdensmester-bonus (ved finalesejr)</span>
+                    <span className="font-semibold text-white">Mester-bonus (ved finalesejr)</span>
                   </div>
-                  <span className="text-2xl font-bold text-amber-300">+200 pt</span>
+                  <span className="text-2xl font-bold text-amber-300">+{Q.final} pt</span>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  Vinderen af finalen har derudover samlet alle kvalifikations-bonusser undervejs
-                  (100+100+200+200+200 = 800 pt) — så VM-titlen er i alt 1.000 pt værd oven i kamppointene.
+                  Vinderen af finalen har samlet alle kvalifikations-bonusser undervejs
+                  ({T.scoring.groupQualBonus}+{Q.round_of_16}+{Q.quarter_final}+{Q.semi_final}+{Q.final} = {CHAMPION_BONUS} pt) — så mesterskabet er
+                  i alt {CHAMPION_BONUS} pt værd oven i kamppointene.
                 </p>
               </div>
 
               {/* Eksempel */}
               <div className="rounded-lg bg-white/[0.03] border border-white/[0.06] px-4 py-4">
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Eksempel — England vinder finalen på straffe mod Egypten (1-1 e.f.t.)</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Eksempel — Real Madrid vinder finalen på straffe mod Arsenal (1-1 e.f.t.)</p>
                 <div className="space-y-1.5 text-xs">
                   <div className="flex justify-between">
-                    <span className="text-slate-300">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England — uafgjort i ordinær spilletid (begge)</span>
-                    <span className="text-amber-200">+50 pt</span>
+                    <span className="text-slate-300">Real Madrid — uafgjort i ordinær spilletid (begge)</span>
+                    <span className="text-amber-200">+{T.scoring.etBase} pt</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-300">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England — vinder på straffe</span>
-                    <span className="text-amber-200">+50 pt</span>
+                    <span className="text-slate-300">Real Madrid — vinder på straffe</span>
+                    <span className="text-amber-200">+{T.scoring.etWin} pt</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-300">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England — verdensmester-bonus</span>
-                    <span className="text-amber-200">+200 pt</span>
+                    <span className="text-slate-300">Real Madrid — mester-bonus</span>
+                    <span className="text-amber-200">+{Q.final} pt</span>
                   </div>
                   <div className="flex justify-between border-t border-white/10 pt-1.5 mt-1.5">
-                    <span className="font-semibold text-white">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England i alt (denne kamp)</span>
-                    <span className="font-bold text-amber-300">300 pt</span>
+                    <span className="font-semibold text-white">Real Madrid i alt (denne kamp)</span>
+                    <span className="font-bold text-amber-300">{T.scoring.etBase + T.scoring.etWin + Q.final} pt</span>
                   </div>
                   <div className="border-t border-white/10 pt-1.5 mt-1.5 space-y-1.5">
                     <div className="flex justify-between">
-                      <span className="text-slate-300">🇪🇬 Egypten — uafgjort i ordinær spilletid (begge)</span>
-                      <span className="text-amber-200">+50 pt</span>
+                      <span className="text-slate-300">Arsenal — uafgjort i ordinær spilletid (begge)</span>
+                      <span className="text-amber-200">+{T.scoring.etBase} pt</span>
                     </div>
                     <div className="flex justify-between border-t border-white/10 pt-1.5 mt-1.5">
-                      <span className="font-semibold text-white">🇪🇬 Egypten i alt (denne kamp)</span>
-                      <span className="font-bold text-amber-300">50 pt</span>
+                      <span className="font-semibold text-white">Arsenal i alt (denne kamp)</span>
+                      <span className="font-bold text-amber-300">{T.scoring.etBase} pt</span>
                     </div>
                   </div>
                   <p className="text-slate-500 pt-1.5 border-t border-white/10 mt-1.5">
-                    Begge hold har allerede banket deres kvalifikations-bonusser undervejs — bl.a.
-                    +200 for at nå finalen (tildelt ved semifinale-sejren). Egyptens samlede
-                    "sølvmedalje-udbytte" er derfor stadig 800 pt, og Englands VM-titel 1.000 pt —
+                    Begge hold har allerede banket deres kvalifikations-bonusser undervejs — bl.a. +{Q.semi_final}{" "}
+                    for at nå finalen (tildelt ved semifinale-sejren). Arsenals samlede
+                    &quot;sølvmedalje-udbytte&quot; er derfor {RUNNER_UP_BONUS} pt, og Real Madrids titel {CHAMPION_BONUS} pt —
                     pointene kommer bare løbende i stedet for til sidst.
                   </p>
                 </div>
@@ -202,7 +235,7 @@ export default function ReglerPage() {
             <div className="px-5 py-4 space-y-3 text-sm text-slate-300">
               <p>Den spiller der har flest <strong className="text-white">turneringspoint i alt</strong> fra alle sine hold tilsammen, vinder spillet — uanset hvor mange mønter der er tilbage.</p>
               <div className="rounded-lg bg-emerald-500/10 border border-emerald-400/20 px-4 py-3">
-                <p className="text-xs text-emerald-200/80"><span className="font-semibold">Tip:</span> Det kan betale sig at købe mange mellemgode hold frem for ét fantastisk hold. Et hold der når semifinalen har samlet 600 point i kvalifikations-bonus undervejs — det er mere end en hel VM-vinder-grupperunde!</p>
+                <p className="text-xs text-emerald-200/80"><span className="font-semibold">Tip:</span> Ligafasen er {T.leagueRounds} kampe for hvert eneste hold, så bredde betaler sig. Et hold der bare vinder halvdelen af sine ligakampe giver {Math.round(T.leagueRounds / 2) * T.scoring.groupWin} point, mens hele vejen til semifinalen kun giver {SEMI_BONUS} point i kvalifikations-bonus oven i kamppointene. Mange mellemgode hold kan sagtens slå ét fantastisk.</p>
               </div>
             </div>
           </section>
@@ -218,7 +251,7 @@ export default function ReglerPage() {
                 <li className="flex gap-2"><span className="text-purple-400 mt-0.5">•</span><span>Point opdateres automatisk efter hver kamp — du behøver ikke gøre noget.</span></li>
                 <li className="flex gap-2"><span className="text-purple-400 mt-0.5">•</span><span>Du kan følge din stilling og dine holds point løbende på spil-siden.</span></li>
                 <li className="flex gap-2"><span className="text-purple-400 mt-0.5">•</span><span>Hold der ikke er solgt på auktion tæller ikke med i pointsystemet.</span></li>
-                <li className="flex gap-2"><span className="text-purple-400 mt-0.5">•</span><span>Tredjepladsekampen tæller <strong className="text-white">ikke</strong> med i pointsystemet.</span></li>
+                <li className="flex gap-2"><span className="text-purple-400 mt-0.5">•</span><span>Playoff-runden (1/16) tæller <strong className="text-white">ikke</strong> med — hverken kamppoint eller bonus.</span></li>
               </ul>
             </div>
           </section>

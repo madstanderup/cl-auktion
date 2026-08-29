@@ -11,6 +11,9 @@ import type { TournamentConfig } from "./types";
 export const CL2627: TournamentConfig = {
   id: "cl2627",
   label: "Champions League 26/27",
+  name: "Champions League",
+  season: "26/27",
+  teamNoun: "klubber",
   teamCount: CL2627_TEAMS.length,
   teams: CL2627_TEAMS,
   findTeam: findCL2627Team,

@@ -7,6 +7,9 @@ import type { TournamentConfig } from "./types";
 export const WC2026: TournamentConfig = {
   id: "wc2026",
   label: "VM 2026",
+  name: "Verdensmesterskabet",
+  season: "2026",
+  teamNoun: "landshold",
   teamCount: 48,
   teams: WC2026_TEAMS,
   findTeam: findWC2026Team,

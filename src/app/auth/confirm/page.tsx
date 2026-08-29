@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { CURRENT_TOURNAMENT } from "@/lib/tournaments";
 import Link from "next/link";
 
 type Status = "loading" | "success" | "error";
@@ -78,7 +79,7 @@ function ConfirmInner() {
       <div className="relative w-full max-w-sm">
         <div className="mb-8 flex items-center justify-center gap-2">
           <Sparkles className="size-5 text-amber-300/90" strokeWidth={1.75} />
-          <span className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">VM 2026</span>
+          <span className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">{CURRENT_TOURNAMENT.label}</span>
           <Sparkles className="size-5 text-amber-300/90" strokeWidth={1.75} />
         </div>
 

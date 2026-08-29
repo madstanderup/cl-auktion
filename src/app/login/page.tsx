@@ -9,6 +9,7 @@ import { Starball } from "@/components/starball";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { CURRENT_TOURNAMENT } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
 export default function LoginPage() {
@@ -42,7 +43,7 @@ export default function LoginPage() {
       <div className="relative w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3">
           <Starball className="size-12 drop-shadow-[0_0_20px_rgb(43_95_217/0.5)]" />
-          <span className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">VM 2026</span>
+          <span className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">{CURRENT_TOURNAMENT.label}</span>
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-8 shadow-2xl shadow-blue-950/40 backdrop-blur">

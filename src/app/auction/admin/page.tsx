@@ -21,7 +21,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatStake } from "@/lib/side-bets";
 import { withTimeout } from "@/lib/with-timeout";
-import { AVAILABLE_TOURNAMENTS, getTournament, getTournamentForGame, type TournamentConfig } from "@/lib/tournaments";
+import { AVAILABLE_TOURNAMENTS, CURRENT_TOURNAMENT, getTournamentForGame, type TournamentConfig, type TournamentId } from "@/lib/tournaments";
 
 type AuctionState = {
   current_team_name: string | null;
@@ -73,7 +73,7 @@ export default function AuctionAdminPage() {
   const [session, setSession] = useState<GameAdminSession | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [newGameLabel, setNewGameLabel] = useState("");
-  const [newTournamentType, setNewTournamentType] = useState("wc2026");
+  const [newTournamentType, setNewTournamentType] = useState(CURRENT_TOURNAMENT.id);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -99,7 +99,7 @@ export default function AuctionAdminPage() {
   const [newMatchHome, setNewMatchHome] = useState("");
   const [newMatchAway, setNewMatchAway] = useState("");
   const [newMatchStage, setNewMatchStage] = useState("group");
-  const [gameTournament, setGameTournament] = useState<TournamentConfig>(() => getTournament("wc2026"));
+  const [gameTournament, setGameTournament] = useState<TournamentConfig>(() => CURRENT_TOURNAMENT);
   const [matchAddLoading, setMatchAddLoading] = useState(false);
   // Per-kamp resultat-form state: matchId → {homeScore, awayScore, resultType}
   const [resultForms, setResultForms] = useState<Record<string, { home: string; away: string; type: string }>>({});
@@ -835,7 +835,7 @@ export default function AuctionAdminPage() {
               <select
                 id="tournament-type"
                 value={newTournamentType}
-                onChange={(e) => setNewTournamentType(e.target.value)}
+                onChange={(e) => setNewTournamentType(e.target.value as TournamentId)}
                 className="mt-2 h-11 w-full rounded-md border border-white/15 bg-white/[0.06] px-3 text-sm text-white focus:border-amber-400/50 focus:outline-none"
               >
                 {AVAILABLE_TOURNAMENTS.map((t) => (

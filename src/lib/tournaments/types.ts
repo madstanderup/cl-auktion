@@ -34,8 +34,14 @@ export type StageDef = { key: string; label: string };
 
 export type TournamentConfig = {
   id: TournamentId;
-  /** Fuldt navn, fx "VM 2026". */
+  /** Fuldt navn, fx "Champions League 26/27". */
   label: string;
+  /** Navnet uden sæson, fx "Champions League" — til overskrifter. */
+  name: string;
+  /** Sæson-/årsbetegnelse, fx "26/27" eller "2026". */
+  season: string;
+  /** Hvad holdene kaldes i brødtekst, fx "klubber" eller "landshold". */
+  teamNoun: string;
   /** Antal hold i turneringen. */
   teamCount: number;
   teams: TournamentTeam[];

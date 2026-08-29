@@ -1,7 +1,8 @@
 import { ImageResponse } from "next/og";
 import { fetchPublicStandings } from "@/lib/standings";
+import { CURRENT_TOURNAMENT } from "@/lib/tournaments";
 
-export const alt = "Stilling — VM 2026 Auktion";
+export const alt = `Stilling — ${CURRENT_TOURNAMENT.label} Auktion`;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -12,7 +13,7 @@ export default async function Image({ params }: { params: Promise<{ gameId: stri
   let data: Awaited<ReturnType<typeof fetchPublicStandings>> = null;
   try { data = await fetchPublicStandings(gameId); } catch { /* ignore */ }
 
-  const label = data?.label ?? "VM 2026 Auktion";
+  const label = data?.label ?? `${CURRENT_TOURNAMENT.label} Auktion`;
   const rows = (data?.standings ?? []).slice(0, 6);
 
   return new ImageResponse(
@@ -63,7 +64,7 @@ export default async function Image({ params }: { params: Promise<{ gameId: stri
           ))}
         </div>
 
-        <div style={{ marginTop: "auto", fontSize: 24, color: "#475569" }}>VM 2026 Auktion</div>
+        <div style={{ marginTop: "auto", fontSize: 24, color: "#475569" }}>{`${CURRENT_TOURNAMENT.label} Auktion`}</div>
       </div>
     ),
     { ...size },

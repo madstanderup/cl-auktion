@@ -17,9 +17,12 @@ import {
 } from "@/lib/player-storage";
 import { cn } from "@/lib/utils";
 import { type ScoreMatch } from "@/lib/scoring";
-import { getTournament, calcPointsForTournament, eliminatedForTournament, countAliveForTournament } from "@/lib/tournaments";
+import { getTournament, calcPointsForTournament, eliminatedForTournament, countAliveForTournament, advancementLadder, CURRENT_TOURNAMENT } from "@/lib/tournaments";
 
 type PointMatch = ScoreMatch;
+
+/** Avancement-bonusserne for den turnering forsiden praesenterer. */
+const ADVANCEMENT = advancementLadder(CURRENT_TOURNAMENT);
 
 
 type MyGame = {
@@ -296,28 +299,16 @@ export default function Home() {
     <div className="relative isolate flex min-h-screen flex-col overflow-hidden cl-field text-slate-100">
       {/* Stjernehimlen kommer fra .cl-field — her lægges kun bundfaden på. */}
       <div
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,transparent_35%,oklch(0.108_0.055_268/0.9))]"
+        className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_bottom,transparent_35%,var(--color-cl-abyss))]"
         aria-hidden
       />
 
-      {/*
-        ── CHAMPIONS LEAGUE-REGLER (gem til næste CL-sæson) ──────────────────
-        Header:   Sæson 25/26 · Champions League · Auktion 25/26
-        Tagline:  Real-time auktion mellem 2–8 spillere. Byd løst, byg din trup
-                  og scorer gennem turneringen.
-        Kamp-point:
-          Sejr (90 min): 150  · Sejr forl./str.: 50  · Uafgjort: 50  · Nederlag: 0
-        Avancement:
-          1/8: 100  · KV: 200  · SF: 400  · Finale: 600  · Vinder: 800
-        ──────────────────────────────────────────────────────────────────────
-      */}
-
       <header className="relative z-10 flex flex-col items-center gap-3 pt-10 pb-4">
-        <Starball className="size-14 drop-shadow-[0_0_24px_oklch(0.52_0.19_262/0.55)]" />
+        <Starball className="size-14 drop-shadow-[0_0_24px_rgb(43_95_217/0.55)]" />
         <div className="flex items-center gap-3">
           <span className="h-px w-8 bg-gradient-to-r from-transparent to-slate-600" aria-hidden />
-          <span className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-400">
-            VM 2026
+          <span className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
+            {CURRENT_TOURNAMENT.label}
           </span>
           <span className="h-px w-8 bg-gradient-to-l from-transparent to-slate-600" aria-hidden />
         </div>
@@ -326,16 +317,16 @@ export default function Home() {
       <main className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col px-5 pb-16 pt-2 sm:px-8">
         <h1 className="text-center font-semibold tracking-tight text-balance">
           <span className="block bg-gradient-to-br from-white via-slate-100 to-slate-400 bg-clip-text text-3xl leading-tight text-transparent sm:text-4xl md:text-5xl">
-            Verdensmesterskabet
+            {CURRENT_TOURNAMENT.name}
           </span>
           <span className="mt-1 block bg-gradient-to-r from-amber-200 via-amber-100 to-amber-300 bg-clip-text text-2xl text-transparent sm:text-3xl md:text-4xl">
-            Auktion 2026
+            Auktion {CURRENT_TOURNAMENT.season}
           </span>
         </h1>
 
         <p className="mx-auto mt-5 max-w-md text-center text-sm leading-relaxed text-slate-400">
-          Real-time auktion mellem 2–8 spillere. Byd på VM-hold, byg din trup og følg
-          pointene gennem hele turneringen.
+          Real-time auktion mellem 2–8 spillere. Byd på {CURRENT_TOURNAMENT.teamCount}{" "}
+          {CURRENT_TOURNAMENT.teamNoun}, byg din trup og følg pointene gennem hele turneringen.
         </p>
 
         <div className="mt-4 flex justify-center">
@@ -385,11 +376,14 @@ export default function Home() {
                   Kamp-point
                 </p>
                 <p className="mt-2 text-xs text-slate-400">
-                  Sejr (ordinær tid): <strong className="text-slate-200">150</strong>
+                  Sejr (ordinær tid):{" "}
+                  <strong className="text-slate-200">{CURRENT_TOURNAMENT.scoring.groupWin}</strong>
                   {" · "}
-                  Sejr (forl. / str.): <strong className="text-slate-200">50</strong>
+                  Sejr (forl. / str.):{" "}
+                  <strong className="text-slate-200">{CURRENT_TOURNAMENT.scoring.etWin}</strong>
                   {" · "}
-                  Uafgjort: <strong className="text-slate-200">50</strong>
+                  Uafgjort:{" "}
+                  <strong className="text-slate-200">{CURRENT_TOURNAMENT.scoring.groupDraw}</strong>
                   {" · "}
                   Nederlag: <strong className="text-slate-200">0</strong>
                 </p>
@@ -397,17 +391,31 @@ export default function Home() {
                   Avancement-bonusser
                 </p>
                 <p className="mt-2 text-xs leading-relaxed text-slate-400">
-                  1/16-finale: <strong className="text-slate-200">100</strong>
-                  {" · "}
-                  1/8-finale: <strong className="text-slate-200">200</strong>
-                  {" · "}
-                  Kvartfinale: <strong className="text-slate-200">400</strong>
-                  {" · "}
-                  Semifinale: <strong className="text-slate-200">600</strong>
-                  {" · "}
-                  Finale: <strong className="text-slate-200">800</strong>
-                  {" · "}
-                  Vinder: <strong className="text-amber-200/90">1.000</strong>
+                  {ADVANCEMENT.map((step, i) => (
+                    <span key={step.label}>
+                      {i > 0 ? " · " : null}
+                      {step.label}:{" "}
+                      <strong
+                        className={i === ADVANCEMENT.length - 1 ? "text-amber-200/90" : "text-slate-200"}
+                      >
+                        {step.points}
+                      </strong>
+                    </span>
+                  ))}
+                </p>
+                <p className="mt-2 text-[0.7rem] leading-relaxed text-slate-500">
+                  {CURRENT_TOURNAMENT.id === "cl2627" ? (
+                    <>
+                      Top 8 i ligafasen går direkte i 1/8 og får de samme{" "}
+                      {CURRENT_TOURNAMENT.scoring.groupQualBonus} point som en playoff-sejr — playoffet
+                      i sig selv giver hverken kamppoint eller bonus.
+                    </>
+                  ) : (
+                    <>
+                      Videre fra gruppespillet:{" "}
+                      <strong className="text-slate-300">{CURRENT_TOURNAMENT.scoring.groupQualBonus}</strong>
+                    </>
+                  )}
                 </p>
               </div>
             </section>

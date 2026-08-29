@@ -14,11 +14,34 @@ const REGISTRY: Record<string, TournamentConfig> = {
   cl2627: CL2627,
 };
 
-/** Turneringer der kan vælges ved spiloprettelse. */
+/**
+ * Turneringen appen præsenteres med lige nu — bruges på forside, login og
+ * andre flader der ikke hører til ét bestemt spil. Skift den her, så følger
+ * overskrifter, regler og pointtal med.
+ */
+export const CURRENT_TOURNAMENT: TournamentConfig = CL2627;
+
+/** Turneringer der kan vælges ved spiloprettelse — den aktuelle først. */
 export const AVAILABLE_TOURNAMENTS: { id: TournamentId; label: string; available: boolean }[] = [
-  { id: "wc2026", label: "VM 2026", available: true },
-  { id: "cl2627", label: "Champions League 26/27 (beta — dummy-hold)", available: true },
-];
+  CL2627,
+  WC2026,
+].map((t) => ({ id: t.id, label: t.label, available: true }));
+
+/**
+ * Avancement-stigen: hvad hvert skridt videre er værd. En sejr i en runde
+ * giver adgang til den næste, så bonussen mærkes med den runde man NÅR —
+ * sejren i finalen giver mestertitlen.
+ */
+export function advancementLadder(config: TournamentConfig): { label: string; points: number }[] {
+  const out: { label: string; points: number }[] = [];
+  config.stages.forEach((stage, i) => {
+    const points = config.scoring.qualOnWin[stage.key];
+    if (!points) return;
+    const next = config.stages[i + 1];
+    out.push({ label: next ? `Nå ${next.label}` : "Mester", points });
+  });
+  return out;
+}
 
 /**
  * Pointberegning for et hold i en given turnering.

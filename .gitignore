@@ -45,3 +45,6 @@ next-env.d.ts
 # Lokale scratch-data (holdet import)
 holdet_data/
 Holdet_VM2026_spillere.xlsx
+
+# Claude Code: personlige indstillinger deles ikke
+.claude/settings.local.json

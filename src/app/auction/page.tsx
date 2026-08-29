@@ -4,9 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Gavel, Loader2, User } from "lucide-react";
 
+import { AuctionAdminDock } from "@/components/auction-admin-dock";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PLAYER_GAME_ID_KEY, PLAYER_ID_KEY } from "@/lib/player-storage";
+import type { GameAdminSession } from "@/lib/player-storage";
+import { PLAYER_GAME_ID_KEY, PLAYER_ID_KEY, readAdminSession } from "@/lib/player-storage";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +51,7 @@ type TeamListEntry = {
 export default function AuctionPage() {
   const [gameId, setGameId] = useState<string | null>(null);
   const [playerId, setPlayerId] = useState<string | null>(null);
+  const [adminSession, setAdminSession] = useState<GameAdminSession | null>(null);
   const [player, setPlayer] = useState<PlayerRow | null>(null);
   const [playerLoading, setPlayerLoading] = useState(true);
 
@@ -89,9 +92,11 @@ export default function AuctionPage() {
     try {
       setGameId(localStorage.getItem(PLAYER_GAME_ID_KEY));
       setPlayerId(localStorage.getItem(PLAYER_ID_KEY));
+      setAdminSession(readAdminSession());
     } catch {
       setGameId(null);
       setPlayerId(null);
+      setAdminSession(null);
     }
   }, []);
 
@@ -760,6 +765,27 @@ export default function AuctionPage() {
     roomStats.playersTotal > 0 &&
     roomStats.bidsCurrentRound >= roomStats.playersTotal;
 
+  // Værten for DETTE spil får styringen med i selve auktionsrummet.
+  const isHost = Boolean(adminSession && gameId && adminSession.gameId === gameId);
+
+  const refreshAfterAdminAction = useCallback(() => {
+    if (!gameId) return;
+    void (async () => {
+      const { data } = await supabase
+        .from("auction_state")
+        .select(
+          "id,current_team_name,current_round_id,current_phase,tied_player_ids,tie_break_min_bid,status,updated_at,resolution_team_name,resolution_winner_name,resolution_winning_bid,resolution_until",
+        )
+        .eq("game_id", gameId)
+        .order("updated_at", { ascending: false })
+        .limit(1);
+      if (data?.[0]) applyAuctionRow(data[0] as Record<string, unknown>);
+    })();
+    void loadOwnershipSummary(gameId);
+    void loadTeamList(gameId);
+    if (playerId) void loadPlayer(playerId, gameId);
+  }, [applyAuctionRow, gameId, loadOwnershipSummary, loadPlayer, loadTeamList, playerId]);
+
   if (!gameId) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#030711] px-6 text-slate-100">
@@ -798,6 +824,7 @@ export default function AuctionPage() {
   }
 
   return (
+    <>
     <div className="relative isolate min-h-screen overflow-hidden bg-[#030711] text-slate-100">
       <div
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_100%_60%_at_50%_-15%,rgba(59,130,246,0.18),transparent_50%)]"
@@ -845,7 +872,13 @@ export default function AuctionPage() {
         </div>
       </header>
 
-      <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-12 sm:px-6 lg:flex-row lg:items-start lg:justify-center">
+      <div
+        className={cn(
+          "relative z-10 mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-12 sm:px-6 lg:flex-row lg:items-start lg:justify-center",
+          // Plads til den faste værts-dock i bunden
+          isHost && "pb-64 sm:pb-56",
+        )}
+      >
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center lg:mx-0">
         {victoryBannerActive && auction ? (
           <div
@@ -1219,5 +1252,20 @@ export default function AuctionPage() {
       </aside>
       </div>
     </div>
+
+      {isHost && adminSession ? (
+        <AuctionAdminDock
+          session={adminSession}
+          status={status}
+          currentTeamName={auction?.current_team_name ?? null}
+          currentPhase={auction?.current_phase ?? 0}
+          tieBreakMinBid={auction?.tie_break_min_bid ?? null}
+          bidsCurrentRound={roomStats.bidsCurrentRound}
+          playersTotal={roomStats.playersTotal}
+          teamsWithoutOwner={roomStats.teamsWithoutOwner}
+          onAction={refreshAfterAdminAction}
+        />
+      ) : null}
+    </>
   );
 }

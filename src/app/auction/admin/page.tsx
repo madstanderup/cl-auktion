@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, Loader2, Plus, ShieldCheck, Trash2, Trophy, XCircle } from "lucide-react";
+import { Copy, Gavel, Loader2, Plus, ShieldCheck, Trash2, Trophy, XCircle } from "lucide-react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,11 +13,14 @@ import {
   PLAYER_GAME_ID_KEY,
   PLAYER_ID_KEY,
   PLAYER_NAME_KEY,
+  readAdminSession,
+  writeAdminSession,
 } from "@/lib/player-storage";
 import { supabase } from "@/lib/supabase";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { formatStake } from "@/lib/side-bets";
+import { withTimeout } from "@/lib/with-timeout";
 import { AVAILABLE_TOURNAMENTS, getTournament, getTournamentForGame, type TournamentConfig } from "@/lib/tournaments";
 
 type AuctionState = {
@@ -64,48 +67,6 @@ const RESULT_TYPE_LABELS: Record<string, string> = {
   penalties:   "Straffespark",
 };
 
-const REQUEST_TIMEOUT_MS = 12_000;
-
-async function withTimeout<T>(promise: PromiseLike<T>, label: string): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(`${label} tog for lang tid. Prøv igen.`));
-    }, REQUEST_TIMEOUT_MS);
-  });
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-  }
-}
-
-function readAdminSession(): GameAdminSession | null {
-  try {
-    const raw = localStorage.getItem(GAME_ADMIN_SESSION_KEY);
-    if (!raw) return null;
-    const o = JSON.parse(raw) as Record<string, unknown>;
-    if (
-      typeof o.gameId === "string" &&
-      typeof o.adminSecret === "string" &&
-      typeof o.inviteCode === "string"
-    ) {
-      return {
-        gameId: o.gameId,
-        adminSecret: o.adminSecret,
-        inviteCode: o.inviteCode,
-        label: typeof o.label === "string" ? o.label : null,
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function writeAdminSession(s: GameAdminSession) {
-  localStorage.setItem(GAME_ADMIN_SESSION_KEY, JSON.stringify(s));
-}
 
 export default function AuctionAdminPage() {
   const router = useRouter();
@@ -1140,9 +1101,20 @@ export default function AuctionAdminPage() {
           </p>
         ) : null}
 
-        <Link href="/auction" className={cn(buttonVariants({ variant: "outline" }), "mt-6 inline-flex w-full justify-center")}>
-          Til spiller-visning (samme spil som denne browser er vært for)
+        <Link
+          href="/auction"
+          className={cn(
+            buttonVariants({ variant: "default" }),
+            "mt-6 inline-flex h-11 w-full justify-center gap-2 text-base font-semibold",
+          )}
+        >
+          <Gavel className="size-4" aria-hidden />
+          Åbn auktionsrummet — byd og styr samme sted
         </Link>
+        <p className="mt-2 text-center text-xs text-slate-500">
+          Som vært får du dine kontroller (træk hold, afslør, afslut) med i auktionsrummet, så du
+          ikke behøver to vinduer.
+        </p>
 
         {/* ── Kampresultater ─────────────────────────────────────────── */}
         <div className="mt-8 rounded-xl border border-white/10 bg-black/30 p-4">

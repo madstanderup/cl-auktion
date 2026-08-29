@@ -12,3 +12,31 @@ export type GameAdminSession = {
 
 /** Vært: gemmer game_id + hemmelig nøgle til admin-RPC’er (beskyt i produktion med rigtig auth). */
 export const GAME_ADMIN_SESSION_KEY = "cl-auction-game-admin-session";
+
+/** Læser værtens gemte admin-session fra localStorage (null hvis ingen/ugyldig). */
+export function readAdminSession(): GameAdminSession | null {
+  try {
+    const raw = localStorage.getItem(GAME_ADMIN_SESSION_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    if (
+      typeof o.gameId === "string" &&
+      typeof o.adminSecret === "string" &&
+      typeof o.inviteCode === "string"
+    ) {
+      return {
+        gameId: o.gameId,
+        adminSecret: o.adminSecret,
+        inviteCode: o.inviteCode,
+        label: typeof o.label === "string" ? o.label : null,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeAdminSession(s: GameAdminSession) {
+  localStorage.setItem(GAME_ADMIN_SESSION_KEY, JSON.stringify(s));
+}

@@ -1,86 +1,28 @@
 import { createClient as createAdminClient, type SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { CL2627_LEAGUE_FIXTURES } from "@/lib/tournaments/cl2627-fixtures";
+import { parseUefaMatch, type ParsedMatch, type UefaMatch } from "@/lib/tournaments/cl-uefa";
 import { findCL2627Team } from "@/lib/tournaments/cl2627-teams";
 import { clCalcTeamPoints } from "@/lib/tournaments/cl-scoring";
 import type { ScoreMatch } from "@/lib/scoring";
 
-const ZAFRONIX_API_KEY = "zwc_free_a414055dfd6fb1c29b4edb19";
-// season = startår: 2026 → "UEFA Champions League 2026/27".
-// Endpointet svarer 404 indtil sæsonens datasæt publiceres (lodtrækning ultimo
-// august 2026) — det håndteres som en stille no-op, så cron-jobbet bare venter.
-const ZAFRONIX_URL = "https://api.zafronix.com/uefa/championsleague/v1/matches?season=2026";
-
-/**
- * Zafronix' stageNormalized → vores stage-keys (wc_matches.stage-constraint).
- * Ligafasens præcise navngivning i 26/27-datasættet kendes ikke endnu, så vi
- * matcher tolerant på præfikser; ukendte stages rapporteres i responsen.
- */
-function mapStage(normalized: string | undefined): string | null {
-  const s = (normalized ?? "").toLowerCase();
-  if (s === "round_of_16" || s === "quarter_final" || s === "semi_final" || s === "final") return s;
-  if (s.startsWith("league") || s.startsWith("matchday") || s === "group_stage") return "league";
-  if (s.includes("playoff")) return "playoff";
-  return null;
-}
-
-type ApiMatch = {
-  id: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeScore: number | null;
-  awayScore: number | null;
-  extraTime: boolean;
-  penalties: { home: number; away: number } | null;
-  penaltyShootout?: { winner: "home" | "away" } | null;
-  stageNormalized: string;
-  leg?: number;
-  kickoffUtc?: string;
-  date?: string;
-  kickoff?: string;
-  matchDate?: string;
-  kickOff?: string;
-  startTime?: string;
-  datetime?: string;
-  scheduledAt?: string;
-  utcDate?: string;
-  status?: string;
-  goals?: { minute: number; team: "home" | "away"; scorer: string }[] | null;
-  cards?: { minute: number; team: "home" | "away"; player: string; color: "yellow" | "red"; addedMinute?: number }[] | null;
-  lineups?: { home: unknown[]; away: unknown[] } | null;
-  substitutions?: { minute: number; team: "home" | "away"; on: string; off: string }[] | null;
-  managers?: { home: string; away: string } | null;
-  stadium?: string | null;
-  venue?: string | null;
-  city?: string | null;
-};
+// UEFA's eget kamp-API — samme kilde som uefa.com selv bruger. Ingen API-nøgle,
+// kun den header uefa.com sender. seasonYear er året finalen spilles, så 2027
+// = sæson 26/27. Zafronix, som VM-syncen bruger, fik aldrig CL's ligafase:
+// deres 25/26-datasæt indeholder kun knockout-kampene.
+const UEFA_URL = "https://match.uefa.com/v5/matches?competitionId=1&seasonYear=2027&limit=500&offset=0";
+const UEFA_HEADERS = { "x-requested-with": "uefa.com" };
 
 type DbMatch = {
   id: string;
   game_id: string;
+  /** Kolonnen hedder stadig zafronix_*, men rummer UEFA's kamp-id for CL. */
   zafronix_match_id: string | null;
   home_team: string;
   away_team: string;
   stage: string;
   status: string;
 };
-
-function extractDate(m: ApiMatch): string | null {
-  const raw =
-    m.kickoffUtc ?? m.datetime ?? m.scheduledAt ?? m.utcDate ??
-    m.matchDate ?? m.kickOff ?? m.startTime ?? m.date ?? null;
-  if (!raw) return null;
-  try { return new Date(raw).toISOString(); } catch { return null; }
-}
-
-function getPenaltyWinner(m: ApiMatch): "home" | "away" | null {
-  if (m.penaltyShootout?.winner) return m.penaltyShootout.winner;
-  if (m.penalties) {
-    if (m.penalties.home > m.penalties.away) return "home";
-    if (m.penalties.away > m.penalties.home) return "away";
-  }
-  return null;
-}
 
 function adminClient() {
   return createAdminClient(
@@ -189,68 +131,53 @@ export async function POST(req: Request) {
 }
 
 async function runSync(_req: Request) {
-  // 1. Hent kampe fra Zafronix (DB-klienten oprettes først når der er data)
+  // 1. Hent kampe fra UEFA (DB-klienten oprettes først når der er data)
   let apiRes: Response;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
-    apiRes = await fetch(ZAFRONIX_URL, {
-      headers: { "X-API-Key": ZAFRONIX_API_KEY },
+    apiRes = await fetch(UEFA_URL, {
+      headers: UEFA_HEADERS,
       cache: "no-store",
       signal: controller.signal,
     });
     clearTimeout(timeout);
   } catch (err) {
-    const msg = String(err).includes("abort") ? "Zafronix svarede ikke inden for 15 sekunder (timeout)" : `Zafronix fetch fejl: ${String(err)}`;
+    const msg = String(err).includes("abort") ? "UEFA svarede ikke inden for 15 sekunder (timeout)" : `UEFA fetch fejl: ${String(err)}`;
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  // 26/27-datasættet er ikke publiceret endnu. Kampprogrammet fra lodtrækningen
-  // oprettes alligevel nedenfor, så kørslen ikke er spildt.
-  const datasetMissing = apiRes.status === 404;
-
-  if (!apiRes.ok && !datasetMissing) {
+  if (!apiRes.ok) {
     const body = await apiRes.text().catch(() => "");
-    const isRateLimit = apiRes.status === 429;
     return NextResponse.json({
-      error: isRateLimit
-        ? `API rate limit nået (429) — du har brugt din daglige kvote. Prøv igen i morgen.`
-        : `Zafronix API fejl: HTTP ${apiRes.status}`,
+      error: `UEFA API fejl: HTTP ${apiRes.status}`,
       body: body.slice(0, 300),
     }, { status: 502 });
   }
 
-  let allMatches: ApiMatch[] = [];
-  if (!datasetMissing) {
-    let apiData: { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];
-    try {
-      apiData = (await apiRes.json()) as { data?: ApiMatch[]; matches?: ApiMatch[] } | ApiMatch[];
-    } catch (err) {
-      return NextResponse.json({ error: `JSON parse fejl: ${String(err)}` }, { status: 502 });
-    }
-    if (Array.isArray(apiData)) {
-      allMatches = apiData;
-    } else if (Array.isArray((apiData as { data?: ApiMatch[] }).data)) {
-      allMatches = (apiData as { data: ApiMatch[] }).data;
-    } else if (Array.isArray((apiData as { matches?: ApiMatch[] }).matches)) {
-      allMatches = (apiData as { matches: ApiMatch[] }).matches;
-    }
+  let allMatches: UefaMatch[] = [];
+  try {
+    const apiData = (await apiRes.json()) as UefaMatch[];
+    if (Array.isArray(apiData)) allMatches = apiData;
+  } catch (err) {
+    return NextResponse.json({ error: `JSON parse fejl: ${String(err)}` }, { status: 502 });
   }
 
-  const sampleFields = allMatches[0] ? Object.keys(allMatches[0]) : [];
+  // Kun turneringsfasen — kvalifikationen har sin egen "Play-Offs"-runde, som
+  // ikke må forveksles med knockout-playoff'en mellem nr. 9-24.
+  const tournament = allMatches.filter((m) => m.competitionPhase === "TOURNAMENT");
   const unknownStages = new Set<string>();
-  const relevant = allMatches.filter((m) => {
-    const stage = mapStage(m.stageNormalized);
-    if (!stage) unknownStages.add(m.stageNormalized ?? "(mangler)");
-    return stage !== null;
-  });
+  const relevant: ParsedMatch[] = [];
+  for (const m of tournament) {
+    const parsed = parseUefaMatch(m);
+    if (parsed) relevant.push(parsed);
+    else unknownStages.add(m.round?.metaData?.name ?? "(mangler)");
+  }
 
-  // Ingen resultater at hente — kampprogrammet oprettes stadig nedenfor.
-  const apiNote = datasetMissing
-    ? "CL 26/27-datasæt ikke publiceret hos Zafronix endnu — kun kampprogrammet er lagt ind."
-    : relevant.length === 0
-      ? "Ingen kampe fundet i kendte stages."
-      : null;
+  // Ingen kampe at hente — kampprogrammet oprettes stadig nedenfor.
+  const apiNote = relevant.length === 0
+    ? "Ingen kampe i turneringsfasen hos UEFA endnu — kun kampprogrammet er lagt ind."
+    : null;
 
   // 2. Hent CL-spil og deres eksisterende kampe
   const supabase = adminClient();
@@ -288,26 +215,19 @@ async function runSync(_req: Request) {
   const unmatchedNames = new Set<string>();
 
   for (const m of relevant) {
-    const rawHome = (m.homeTeam ?? "").trim();
-    const rawAway = (m.awayTeam ?? "").trim();
+    const rawHome = m.rawHome;
+    const rawAway = m.rawAway;
     const homeResolved = rawHome ? findCL2627Team(rawHome) : undefined;
     const awayResolved = rawAway ? findCL2627Team(rawAway) : undefined;
     if (rawHome && !homeResolved) unmatchedNames.add(rawHome);
     if (rawAway && !awayResolved) unmatchedNames.add(rawAway);
     const homeTeam = rawHome ? (homeResolved?.name ?? rawHome) : "TBD";
     const awayTeam = rawAway ? (awayResolved?.name ?? rawAway) : "TBD";
-    const stage = mapStage(m.stageNormalized)!;
-    const matchDate = extractDate(m);
-    // CL-datasættet har ikke altid et status-felt — udled "finished" af at
-    // begge scorer er sat, når feltet mangler.
-    let apiStatus =
-      m.status === "finished" ? "finished"
-      : m.status === "live" ? "live"
-      : m.status == null && m.homeScore != null && m.awayScore != null ? "finished"
-      : "scheduled";
-    const hasPenalties = !!(m.penalties ?? m.penaltyShootout);
-    const resultType = hasPenalties ? "penalties" : m.extraTime ? "extra_time" : "normal_time";
-    const winnerSide = getPenaltyWinner(m);
+    const stage = m.stage;
+    const matchDate = m.matchDate;
+    let apiStatus = m.status;
+    const resultType = m.resultType;
+    const winnerSide = m.winnerSide;
     // Stol ikke på umulige resultater: "færdig" uden scorer, eller en "færdig"
     // FINALE der står lige uden straffe-vinder (dobbeltopgørs-ben kan lovligt
     // ende uafgjort). Behandl som live, så der ikke gives forkerte point —
@@ -337,28 +257,22 @@ async function runSync(_req: Request) {
         };
         if (matchDate) updates.match_date = matchDate;
         if (isFinished) {
-          updates.home_score    = m.homeScore;
-          updates.away_score    = m.awayScore;
-          updates.result_type   = resultType;
-          updates.winner_side   = winnerSide;
-          updates.goals         = m.goals ?? null;
-          updates.cards         = m.cards ?? null;
-          updates.lineups       = m.lineups ?? null;
-          updates.substitutions = m.substitutions ?? null;
-          pointsRecalculated    = true;
-        } else {
-          if (m.lineups) updates.lineups = m.lineups;
-          if (m.goals)   updates.goals   = m.goals;
-          if (m.cards)   updates.cards   = m.cards;
+          updates.home_score  = m.homeScore;
+          updates.away_score  = m.awayScore;
+          updates.result_type = resultType;
+          updates.winner_side = winnerSide;
+          updates.goals       = m.goals;
+          pointsRecalculated  = true;
+        } else if (m.goals) {
+          updates.goals = m.goals;
         }
-        if (m.stadium ?? m.venue) updates.stadium = m.stadium ?? m.venue;
-        if (m.city)     updates.city     = m.city;
-        if (m.managers) updates.managers = m.managers;
+        if (m.stadium) updates.stadium = m.stadium;
+        if (m.city)    updates.city    = m.city;
         toUpdate.push({ id: existing.id, updates });
       } else {
         toInsert.push({
           game_id:           gameId,
-          zafronix_match_id: m.id ?? null,
+          zafronix_match_id: m.id,
           home_team:         homeTeam,
           away_team:         awayTeam,
           stage,
@@ -368,13 +282,9 @@ async function runSync(_req: Request) {
           result_type:       isFinished ? resultType : null,
           winner_side:       isFinished ? winnerSide : null,
           status:            apiStatus,
-          goals:             m.goals ?? null,
-          cards:             m.cards ?? null,
-          lineups:           m.lineups ?? null,
-          substitutions:     isFinished ? (m.substitutions ?? null) : null,
-          managers:          m.managers ?? null,
-          stadium:           m.stadium ?? m.venue ?? null,
-          city:              m.city ?? null,
+          goals:             m.goals,
+          stadium:           m.stadium,
+          city:              m.city,
         });
         if (isFinished) pointsRecalculated = true;
       }
@@ -414,7 +324,6 @@ async function runSync(_req: Request) {
     totalFromApi: allMatches.length,
     relevantFromApi: relevant.length,
     pointsRecalculated,
-    sampleFields,
     unknownStages: [...unknownStages].sort(),
     unmatchedTeamNames: [...unmatchedNames].sort(),
   });

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Gavel, Loader2, User } from "lucide-react";
 
 import { AuctionAdminDock } from "@/components/auction-admin-dock";
+import { AuctionFinishedModal } from "@/components/auction-finished-modal";
 import { Starball } from "@/components/starball";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +14,8 @@ import { PLAYER_GAME_ID_KEY, PLAYER_ID_KEY, readAdminSession } from "@/lib/playe
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 
-type AuctionStatus = "waiting" | "bidding" | "revealed" | "tie_breaker";
+// "finished" saettes af databasen naar sidste hold er tildelt eller udgaaet.
+type AuctionStatus = "waiting" | "bidding" | "revealed" | "tie_breaker" | "finished";
 
 type AuctionStateRow = {
   id: string;
@@ -94,6 +96,8 @@ export default function AuctionPage() {
   const autoBidKeyRef = useRef<string | null>(null);
   /** Runde/fase hvor vi har naaet at slaa op i DB om spilleren allerede har budt. */
   const [bidCheckKey, setBidCheckKey] = useState<string | null>(null);
+  /** Spillet hvor slut-popup'en er lukket igen, saa den ikke straks vender tilbage. */
+  const [finishDismissedFor, setFinishDismissedFor] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -616,6 +620,9 @@ export default function AuctionPage() {
       setBidSuccessMsg("Du har 0 mønter — der er automatisk budt 0 for dig.");
     })();
   }, [auction, bidCheckKey, gameId, hasBidThisPhase, isTiedPlayer, player]);
+
+  const finishedModalOpen =
+    auction?.status === "finished" && gameId != null && finishDismissedFor !== gameId;
 
   const victoryBannerActive = Boolean(
     (auction?.resolution_winner_name || auction?.resolution_withdrawn) &&
@@ -1310,6 +1317,15 @@ export default function AuctionPage() {
       </aside>
       </div>
     </div>
+
+      {finishedModalOpen && gameId ? (
+        <AuctionFinishedModal
+          gameId={gameId}
+          teamsSold={teamList.filter((t) => t.ownerName).length}
+          teamsWithdrawn={teamList.filter((t) => t.withdrawn).length}
+          onClose={() => setFinishDismissedFor(gameId)}
+        />
+      ) : null}
 
       {isHost && adminSession ? (
         <AuctionAdminDock

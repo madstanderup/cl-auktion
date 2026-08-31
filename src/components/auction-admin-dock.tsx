@@ -150,7 +150,8 @@ export function AuctionAdminDock({
         .from("game_teams")
         .select("id")
         .eq("game_id", session.gameId)
-        .is("owner_player_id", null);
+        .is("owner_player_id", null)
+        .eq("withdrawn", false);
       if (e1) { setMessage(`Fejl: ${e1.message}`); return; }
       if (!unowned?.length) { setMessage("Ingen ledige hold at tildele."); return; }
 

@@ -28,6 +28,8 @@ type AuctionStateRow = {
   resolution_winner_name: string | null;
   resolution_winning_bid: number | null;
   resolution_until: string | null;
+  /** Sat naar holdet udgik fordi alle bød 0 tre runder i traek. */
+  resolution_withdrawn: boolean;
 };
 
 type PlayerRow = { id: string; name: string; coins: number };
@@ -48,6 +50,7 @@ type TeamListEntry = {
   teamId: string;
   name: string;
   ownerName: string | null;
+  withdrawn: boolean;
 };
 
 export default function AuctionPage() {
@@ -147,6 +150,7 @@ export default function AuctionPage() {
       resolution_winning_bid:
         row.resolution_winning_bid != null ? Number(row.resolution_winning_bid) : null,
       resolution_until: row.resolution_until != null ? String(row.resolution_until) : null,
+      resolution_withdrawn: row.resolution_withdrawn === true,
     });
   }, []);
 
@@ -173,7 +177,8 @@ export default function AuctionPage() {
             .from("game_teams")
             .select("*", { count: "exact", head: true })
             .eq("game_id", gid)
-            .is("owner_player_id", null),
+            .is("owner_player_id", null)
+            .eq("withdrawn", false),
           supabase
             .from("players")
             .select("*", { count: "exact", head: true })
@@ -236,7 +241,7 @@ export default function AuctionPage() {
   const loadTeamList = useCallback(async (gid: string) => {
     const { data: gtRows } = await supabase
       .from("game_teams")
-      .select("team_id, owner_player_id")
+      .select("team_id, owner_player_id, withdrawn")
       .eq("game_id", gid);
     if (!gtRows) return;
 
@@ -263,6 +268,7 @@ export default function AuctionPage() {
         ownerName: r.owner_player_id
           ? (nameByOwnerId.get(String(r.owner_player_id)) ?? "?")
           : null,
+        withdrawn: r.withdrawn === true,
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "da"));
     setTeamList(list);
@@ -364,7 +370,7 @@ export default function AuctionPage() {
       const { data, error } = await supabase
         .from("auction_state")
         .select(
-          "id,current_team_name,current_round_id,current_phase,tied_player_ids,tie_break_min_bid,status,updated_at,resolution_team_name,resolution_winner_name,resolution_winning_bid,resolution_until",
+          "id,current_team_name,current_round_id,current_phase,tied_player_ids,tie_break_min_bid,status,updated_at,resolution_team_name,resolution_winner_name,resolution_winning_bid,resolution_until,resolution_withdrawn",
         )
         .eq("game_id", gameId)
         .order("updated_at", { ascending: false })
@@ -612,13 +618,15 @@ export default function AuctionPage() {
   }, [auction, bidCheckKey, gameId, hasBidThisPhase, isTiedPlayer, player]);
 
   const victoryBannerActive = Boolean(
-    auction?.resolution_winner_name &&
-      auction.resolution_until &&
+    (auction?.resolution_winner_name || auction?.resolution_withdrawn) &&
+      auction?.resolution_until &&
       new Date(auction.resolution_until).getTime() > now,
   );
+  const withdrawnBannerActive = victoryBannerActive && auction?.resolution_withdrawn === true;
 
   useEffect(() => {
-    if (!auction?.resolution_until || !auction.resolution_winner_name) return;
+    if (!auction?.resolution_until) return;
+    if (!auction.resolution_winner_name && !auction.resolution_withdrawn) return;
     const end = new Date(auction.resolution_until).getTime();
     const tick = () => {
       setNow(Date.now());
@@ -632,11 +640,11 @@ export default function AuctionPage() {
       window.clearInterval(id);
       window.clearTimeout(immediate);
     };
-  }, [auction?.resolution_until, auction?.resolution_winner_name]);
+  }, [auction?.resolution_until, auction?.resolution_winner_name, auction?.resolution_withdrawn]);
 
   // Hent alle bud når vinder-banneret vises
   useEffect(() => {
-    if (!victoryBannerActive || !gameId) return;
+    if (!victoryBannerActive || withdrawnBannerActive || !gameId) return;
     const roundInfo = lastRoundRef.current;
     let cancelled = false;
     (async () => {
@@ -709,7 +717,7 @@ export default function AuctionPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [victoryBannerActive, gameId, auction?.resolution_team_name, auction?.resolution_winner_name, auction?.resolution_winning_bid]);
+  }, [victoryBannerActive, withdrawnBannerActive, gameId, auction?.resolution_team_name, auction?.resolution_winner_name, auction?.resolution_winning_bid]);
 
   const victorySecondsLeft = auction?.resolution_until
     ? Math.max(0, Math.ceil((new Date(auction.resolution_until).getTime() - now) / 1000))
@@ -797,7 +805,7 @@ export default function AuctionPage() {
       const { data } = await supabase
         .from("auction_state")
         .select(
-          "id,current_team_name,current_round_id,current_phase,tied_player_ids,tie_break_min_bid,status,updated_at,resolution_team_name,resolution_winner_name,resolution_winning_bid,resolution_until",
+          "id,current_team_name,current_round_id,current_phase,tied_player_ids,tie_break_min_bid,status,updated_at,resolution_team_name,resolution_winner_name,resolution_winning_bid,resolution_until,resolution_withdrawn",
         )
         .eq("game_id", gameId)
         .order("updated_at", { ascending: false })
@@ -900,7 +908,21 @@ export default function AuctionPage() {
         )}
       >
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col items-center lg:mx-0">
-        {victoryBannerActive && auction ? (
+        {withdrawnBannerActive && auction ? (
+          <div
+            className="mb-4 w-full rounded-2xl border border-slate-500/40 bg-gradient-to-b from-slate-600/20 to-slate-950/50 px-5 py-5 text-center shadow-lg shadow-slate-950/30"
+            role="status"
+            aria-live="polite"
+          >
+            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-slate-400">Udgået</p>
+            <p className="mt-2 text-lg font-bold text-slate-200 line-through decoration-slate-600">
+              {auction.resolution_team_name ?? "Hold"}
+            </p>
+            <p className="mt-3 text-sm text-slate-400">
+              Ingen bød på holdet tre runder i træk. Det tildeles ikke.
+            </p>
+          </div>
+        ) : victoryBannerActive && auction ? (
           <div
             className="mb-4 w-full rounded-2xl border border-amber-400/40 bg-gradient-to-b from-amber-500/20 to-amber-950/40 px-5 py-5 text-center shadow-lg shadow-amber-950/30"
             role="status"
@@ -1238,7 +1260,8 @@ export default function AuctionPage() {
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-semibold tracking-wide text-white">Hold i auktionen</h2>
             <span className="text-xs tabular-nums text-slate-400">
-              {teamList.filter((t) => t.ownerName).length}/{teamList.length} solgt
+              {teamList.filter((t) => t.ownerName).length}/
+              {teamList.filter((t) => !t.withdrawn).length} solgt
             </span>
           </div>
 
@@ -1249,7 +1272,8 @@ export default function AuctionPage() {
               {teamList.map((team) => {
                 const sold = team.ownerName != null;
                 const isCurrent =
-                  !sold && auction?.current_team_name === team.name && status !== "waiting";
+                  !sold && !team.withdrawn &&
+                  auction?.current_team_name === team.name && status !== "waiting";
                 return (
                   <li
                     key={team.teamId}
@@ -1261,7 +1285,7 @@ export default function AuctionPage() {
                     <span
                       className={cn(
                         "truncate",
-                        sold
+                        sold || team.withdrawn
                           ? "text-slate-600 line-through decoration-slate-600"
                           : isCurrent
                             ? "font-semibold text-amber-200"
@@ -1272,6 +1296,8 @@ export default function AuctionPage() {
                     </span>
                     {sold ? (
                       <span className="shrink-0 text-xs text-slate-600">{team.ownerName}</span>
+                    ) : team.withdrawn ? (
+                      <span className="shrink-0 text-xs italic text-slate-600">udgået</span>
                     ) : isCurrent ? (
                       <Gavel className="size-3.5 shrink-0 text-amber-300" aria-hidden />
                     ) : null}

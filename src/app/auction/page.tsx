@@ -1165,15 +1165,20 @@ export default function AuctionPage() {
                         </span>
                       ) : null}
                     </label>
+                    {/* Bevidst type="text" og ikke "number": et talfelt lader
+                        browseren aendre buddet med rullehjulet, med pil op/ned
+                        og med spinner-knapperne i hoejre side. Et bud skal kun
+                        kunne tastes, saa et strejf af musen ikke aendrer det.
+                        inputMode="numeric" beholder taltastaturet paa mobil. */}
                     <Input
                       id="bid-amount"
-                      type="number"
+                      type="text"
                       inputMode="numeric"
-                      min={minBid}
-                      max={player?.coins ?? undefined}
+                      pattern="[0-9]*"
+                      autoComplete="off"
                       placeholder={String(minBid)}
                       value={bidAmount}
-                      onChange={(e) => setBidAmount(e.target.value)}
+                      onChange={(e) => setBidAmount(e.target.value.replace(/[^0-9]/g, ""))}
                       disabled={bidSubmitting}
                       className={cn(
                         "h-11 border-white/15 bg-white/[0.06] text-base text-white",

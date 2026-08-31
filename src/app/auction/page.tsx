@@ -592,16 +592,17 @@ export default function AuctionPage() {
     autoBidKeyRef.current = key;
 
     void (async () => {
-      const { error } = await supabase.from("auction_room_bids").insert({
-        game_id: gameId,
-        player_id: player.id,
-        team_name: auction.current_team_name,
-        amount: 0,
-        round_id: auction.current_round_id,
-        bid_phase: auction.current_phase,
+      // Gaar gennem RPC'en frem for et raakt insert: den tjekker og indsaetter
+      // atomisk, saa to faner eller to enheder ikke kan lave hver sit 0-bud.
+      const { error } = await supabase.rpc("auto_bid_zero_for_player", {
+        p_game_id: gameId,
+        p_player_id: player.id,
+        p_round_id: auction.current_round_id,
+        p_bid_phase: auction.current_phase,
+        p_team_name: auction.current_team_name,
       });
       if (error) {
-        // Tillad nyt forsøg (fx hvis migrationen der tillader 0-bud mangler)
+        // Tillad nyt forsøg (fx hvis migrationen mangler i databasen)
         autoBidKeyRef.current = null;
         return;
       }

@@ -35,7 +35,8 @@ type RoomStats = {
   teamsTotal: number;
   teamsWithoutOwner: number;
   playersTotal: number;
-  bidsCurrentRound: number;
+  /** Unikke spillere der har budt i aktiv runde/fase — rebud giver flere raekker pr. spiller. */
+  bidderIds: string[];
 };
 type PlayerOwnershipSummary = {
   playerId: string;
@@ -70,7 +71,7 @@ export default function AuctionPage() {
     teamsTotal: 0,
     teamsWithoutOwner: 0,
     playersTotal: 0,
-    bidsCurrentRound: 0,
+    bidderIds: [],
   });
   const [ownershipSummary, setOwnershipSummary] = useState<PlayerOwnershipSummary[]>([]);
   const [teamList, setTeamList] = useState<TeamListEntry[]>([]);
@@ -88,6 +89,8 @@ export default function AuctionPage() {
   const lastSavedResultRoundRef = useRef<string | null>(null);
   // Runde+fase hvor der allerede er auto-budt 0 (spiller uden mønter)
   const autoBidKeyRef = useRef<string | null>(null);
+  /** Runde/fase hvor vi har naaet at slaa op i DB om spilleren allerede har budt. */
+  const [bidCheckKey, setBidCheckKey] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -149,16 +152,18 @@ export default function AuctionPage() {
 
   const loadRoomStats = useCallback(
     async (gid: string, roundId: string | null, phase: number) => {
-      const bidsBase = supabase
-        .from("auction_room_bids")
-        .select("*", { count: "exact", head: true })
-        .eq("game_id", gid);
+      // Hent spiller-id'er frem for et raekketal: en spiller der retter sit bud
+      // indsaetter en NY raekke, saa count(*) taeller samme spiller flere gange.
+      const bidsQuery: PromiseLike<{ data: { player_id: unknown }[] | null }> = roundId
+        ? supabase
+            .from("auction_room_bids")
+            .select("player_id")
+            .eq("game_id", gid)
+            .eq("round_id", roundId)
+            .eq("bid_phase", phase)
+        : Promise.resolve({ data: [] });
 
-      const bidsQuery = roundId
-        ? bidsBase.eq("round_id", roundId).eq("bid_phase", phase)
-        : bidsBase.eq("id", "00000000-0000-0000-0000-000000000000");
-
-      const [{ count: teamsTotal }, { count: teamsWithoutOwner }, { count: playersTotal }, { count: bidsCurrentRound }] =
+      const [{ count: teamsTotal }, { count: teamsWithoutOwner }, { count: playersTotal }, bidsRes] =
         await Promise.all([
           supabase
             .from("game_teams")
@@ -180,7 +185,7 @@ export default function AuctionPage() {
         teamsTotal: teamsTotal ?? 0,
         teamsWithoutOwner: teamsWithoutOwner ?? 0,
         playersTotal: playersTotal ?? 0,
-        bidsCurrentRound: bidsCurrentRound ?? 0,
+        bidderIds: [...new Set((bidsRes.data ?? []).map((b) => String(b.player_id)))],
       });
     },
     [],
@@ -542,11 +547,13 @@ export default function AuctionPage() {
   }, [auction, player?.id, gameId, loadPlayer]);
 
   useEffect(() => {
+    setBidCheckKey(null);
     if (!player?.id || !auction?.current_round_id || !gameId) return;
     if (!(auction.status === "bidding" || (auction.status === "tie_breaker" && isTiedPlayer))) {
       setHasBidThisPhase(false);
       return;
     }
+    const key = `${auction.current_round_id}:${auction.current_phase}`;
     let cancelled = false;
     (async () => {
       const { data } = await supabase
@@ -561,6 +568,7 @@ export default function AuctionPage() {
         const hasBid = Boolean(data?.length);
         setHasBidThisPhase(hasBid);
         if (hasBid) setBidSuccessMsg("Bud afgivet! Venter på de andre…");
+        setBidCheckKey(key);
       }
     })();
     return () => {
@@ -576,6 +584,10 @@ export default function AuctionPage() {
     if (!(auction.status === "bidding" || (auction.status === "tie_breaker" && isTiedPlayer))) return;
 
     const key = `${auction.current_round_id}:${auction.current_phase}`;
+    // Vent til DB-opslaget for netop denne runde/fase er kommet tilbage. Ellers
+    // ville et sideskift midt i runden indsaette endnu et 0-bud, fordi
+    // hasBidThisPhase stadig var false mens opslaget var undervejs.
+    if (bidCheckKey !== key) return;
     if (autoBidKeyRef.current === key) return;
     autoBidKeyRef.current = key;
 
@@ -596,7 +608,7 @@ export default function AuctionPage() {
       setHasBidThisPhase(true);
       setBidSuccessMsg("Du har 0 mønter — der er automatisk budt 0 for dig.");
     })();
-  }, [auction, gameId, hasBidThisPhase, isTiedPlayer, player]);
+  }, [auction, bidCheckKey, gameId, hasBidThisPhase, isTiedPlayer, player]);
 
   const victoryBannerActive = Boolean(
     auction?.resolution_winner_name &&
@@ -761,10 +773,19 @@ export default function AuctionPage() {
 
   const auctionFinished = roomStats.teamsTotal > 0 && roomStats.teamsWithoutOwner === 0;
   const canHaveRoundBids = status === "bidding" || status === "tie_breaker";
+
+  // Samme regnestykke som auto-reveal-triggeren i DB: i omauktion er det kun de
+  // uafgjorte spillere der forventes at byde, og kun deres bud der taeller med.
+  const tiedIds = auction?.tied_player_ids ?? null;
+  const expectedBidders =
+    status === "tie_breaker" ? (tiedIds?.length ?? 0) : roomStats.playersTotal;
+  const bidsCurrentRound =
+    status === "tie_breaker"
+      ? roomStats.bidderIds.filter((id) => tiedIds?.includes(id)).length
+      : roomStats.bidderIds.length;
+
   const allBidsSubmitted =
-    canHaveRoundBids &&
-    roomStats.playersTotal > 0 &&
-    roomStats.bidsCurrentRound >= roomStats.playersTotal;
+    canHaveRoundBids && expectedBidders > 0 && bidsCurrentRound >= expectedBidders;
 
   // Værten for DETTE spil får styringen med i selve auktionsrummet.
   const isHost = Boolean(adminSession && gameId && adminSession.gameId === gameId);
@@ -1005,7 +1026,7 @@ export default function AuctionPage() {
                 allBidsSubmitted ? "text-emerald-200" : "text-slate-100",
               )}
             >
-              {roomStats.bidsCurrentRound}
+              {bidsCurrentRound}
             </p>
           </div>
         </section>
@@ -1265,8 +1286,8 @@ export default function AuctionPage() {
           currentTeamName={auction?.current_team_name ?? null}
           currentPhase={auction?.current_phase ?? 0}
           tieBreakMinBid={auction?.tie_break_min_bid ?? null}
-          bidsCurrentRound={roomStats.bidsCurrentRound}
-          playersTotal={roomStats.playersTotal}
+          bidsCurrentRound={bidsCurrentRound}
+          playersTotal={expectedBidders}
           teamsWithoutOwner={roomStats.teamsWithoutOwner}
           onAction={refreshAfterAdminAction}
         />

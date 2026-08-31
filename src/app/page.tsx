@@ -16,6 +16,7 @@ import {
   PLAYER_NAME_KEY,
 } from "@/lib/player-storage";
 import { cn } from "@/lib/utils";
+import { withTimeout } from "@/lib/with-timeout";
 import { type ScoreMatch } from "@/lib/scoring";
 import { getTournament, calcPointsForTournament, eliminatedForTournament, countAliveForTournament, advancementLadder, CURRENT_TOURNAMENT } from "@/lib/tournaments";
 
@@ -119,10 +120,13 @@ export default function Home() {
     try {
       const supabase = createClient();
       // Fetch player rows for this user
-      const { data: playerRows } = await supabase
-        .from("players")
-        .select("id, name, coins, points, game_id")
-        .eq("user_id", uid);
+      const { data: playerRows } = await withTimeout(
+        supabase
+          .from("players")
+          .select("id, name, coins, points, game_id")
+          .eq("user_id", uid),
+        "Opslag af dine spil",
+      );
 
       if (!playerRows || playerRows.length === 0) { setMyGames([]); return; }
 
@@ -133,12 +137,12 @@ export default function Home() {
       if (gamesRes.error) {
         gamesRes = (await supabase.from("games").select("id, invite_code, label").in("id", gameIds)) as typeof gamesRes;
       }
-      const [auctionRes, matchesRes, gtRes, teamsRes] = await Promise.all([
+      const [auctionRes, matchesRes, gtRes, teamsRes] = await withTimeout(Promise.all([
         supabase.from("auction_state").select("game_id, status").in("game_id", gameIds),
         supabase.from("wc_matches").select("game_id,home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").in("game_id", gameIds),
         supabase.from("game_teams").select("game_id, team_id, owner_player_id").in("game_id", gameIds).not("owner_player_id", "is", null),
         supabase.from("teams").select("id, name"),
-      ]);
+      ]), "Opslag af dine spil");
 
       const gameMap = new Map<string, { invite_code: string; label: string | null; tournament_type: string | null }>();
       for (const g of (gamesRes.data ?? []) as Record<string, unknown>[]) {
@@ -206,6 +210,10 @@ export default function Home() {
       });
 
       setMyGames(games);
+    } catch {
+      // En doed forbindelse maa ikke efterlade sektionen i evig spinner —
+      // vis den som tom, praecis som naar en enkelt forespoergsel fejler.
+      setMyGames([]);
     } finally {
       setGamesLoading(false);
     }
@@ -238,11 +246,19 @@ export default function Home() {
 
     try {
       const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      const uid = user?.id ?? null;
+      // Genbrug id'et fra mount-opslaget. Et ekstra auth.getUser() kan blokere
+      // bag supabase-auth'ens lock hvis en token-refresh er gaaet i staa — og saa
+      // ville knappen snurre i det uendelige uden fejlbesked.
+      let uid = userId;
+      if (!uid) {
+        const { data } = await withTimeout(supabase.auth.getUser(), "Brugeropslag");
+        uid = data.user?.id ?? null;
+      }
 
-      const { data: gameRow, error: gameErr } = await supabase
-        .from("games").select("id").eq("invite_code", code).maybeSingle();
+      const { data: gameRow, error: gameErr } = await withTimeout(
+        supabase.from("games").select("id").eq("invite_code", code).maybeSingle(),
+        "Opslag af spilkode",
+      );
       if (gameErr) { alert(gameErr.message); return; }
       if (!gameRow?.id) {
         setInviteError("Ukendt kode — tjek med værten (store bogstaver).");
@@ -255,19 +271,26 @@ export default function Home() {
       // Rejoin: find eksisterende spiller via user_id (foretrukket) eller navn
       let existingId: string | null = null;
       if (uid) {
-        const { data } = await supabase
-          .from("players").select("id,name").eq("game_id", gameId).eq("user_id", uid).maybeSingle();
+        const { data } = await withTimeout(
+          supabase.from("players").select("id,name").eq("game_id", gameId).eq("user_id", uid).maybeSingle(),
+          "Opslag af spiller",
+        );
         if (data?.id) existingId = String(data.id);
       }
       if (!existingId) {
-        const { data } = await supabase
-          .from("players").select("id, user_id").eq("game_id", gameId).eq("name", trimmed).maybeSingle();
+        const { data } = await withTimeout(
+          supabase.from("players").select("id, user_id").eq("game_id", gameId).eq("name", trimmed).maybeSingle(),
+          "Opslag af spiller",
+        );
         if (data?.id) {
           existingId = String(data.id);
           // Knyt spilleren permanent til den indloggede bruger hvis den ikke
           // allerede er taget — så spillet dukker op under "Mine spil" fremover
           if (uid && !data.user_id) {
-            await supabase.from("players").update({ user_id: uid }).eq("id", data.id);
+            await withTimeout(
+              supabase.from("players").update({ user_id: uid }).eq("id", data.id),
+              "Tilknytning af spiller",
+            );
           }
         }
       }
@@ -275,7 +298,10 @@ export default function Home() {
       const playerId = existingId ?? await (async () => {
         const row: Record<string, unknown> = { name: trimmed, coins: 1000, points: 0, game_id: gameId };
         if (uid) row.user_id = uid;
-        const { data, error } = await supabase.from("players").insert([row]).select("id").single();
+        const { data, error } = await withTimeout(
+          supabase.from("players").insert([row]).select("id").single(),
+          "Oprettelse af spiller",
+        );
         if (error) throw error;
         return String(data.id);
       })();

@@ -312,7 +312,21 @@ export default function Home() {
         localStorage.setItem(PLAYER_GAME_ID_KEY, gameId);
       } catch { /* ignore */ }
 
-      router.push(`/game/${gameId}`);
+      // Tilmelding foerer direkte ind i auktionen — det er der spillet starter.
+      // Er auktionen allerede afsluttet, er der intet at byde paa, saa der lander
+      // man i stedet paa spilsiden.
+      let auctionFinished = false;
+      try {
+        const { data: auctionRow } = await withTimeout(
+          supabase.from("auction_state").select("status").eq("game_id", gameId).maybeSingle(),
+          "Opslag af auktion",
+        );
+        auctionFinished = auctionRow?.status === "finished";
+      } catch {
+        // Kan status ikke slaas op, sendes man til auktionen som normalt.
+      }
+
+      router.push(auctionFinished ? `/game/${gameId}` : "/auction");
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       alert(`Fejl: ${message}`);

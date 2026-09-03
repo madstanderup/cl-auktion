@@ -7,12 +7,16 @@ export type WC2026Team = {
   mean: number;
   p90: number;
   stdDev: number;
+  /** Historisk fair pris ved 4 spillere (4.000 mønter) — kilden til fairShare. */
   fairPrice: number;
+  /** Holdets andel af møntpuljen; fair pris i mønter regnes med fairPriceFor(). */
+  fairShare: number;
   flag: string;
   aliases: string[];
 };
 
-export const WC2026_TEAMS: WC2026Team[] = [
+/** Kataloget som det er tastet ind — fairShare udledes nedenfor. */
+const RAW_TEAMS: Omit<WC2026Team, "fairShare">[] = [
   { name: "Spain",          group: "H", mostLikely: 800,  p10: 550, median: 1400, mean: 1352.5, p90: 2150, stdDev: 572.7, fairPrice: 239.2, flag: "🇪🇸", aliases: ["Spanien"] },
   { name: "England",        group: "L", mostLikely: 1150, p10: 550, median: 1150, mean: 1239.9, p90: 2050, stdDev: 534.1, fairPrice: 219.3, flag: "🏴󠁧󠁢󠁥󠁮󠁧󠁿", aliases: ["England"] },
   { name: "France",         group: "I", mostLikely: 800,  p10: 550, median: 1150, mean: 1210.8, p90: 2050, stdDev: 565.6, fairPrice: 214.2, flag: "🇫🇷", aliases: ["Frankrig"] },
@@ -62,6 +66,13 @@ export const WC2026_TEAMS: WC2026Team[] = [
   { name: "Iraq",           group: "I", mostLikely: 0,    p10: 0,   median: 0,    mean: 42.5,   p90: 150,  stdDev: 81.8,  fairPrice: 7.5,   flag: "🇮🇶", aliases: ["Irak"] },
   { name: "Haiti",          group: "C", mostLikely: 0,    p10: 0,   median: 0,    mean: 39.6,   p90: 150,  stdDev: 74.3,  fairPrice: 7.0,   flag: "🇭🇹", aliases: ["Haiti"] },
 ];
+
+const FAIR_TOTAL = RAW_TEAMS.reduce((sum, t) => sum + t.fairPrice, 0);
+
+export const WC2026_TEAMS: WC2026Team[] = RAW_TEAMS.map((t) => ({
+  ...t,
+  fairShare: FAIR_TOTAL > 0 ? t.fairPrice / FAIR_TOTAL : 0,
+}));
 
 /** Slår et holdnavn op (case-insensitiv + aliasser). */
 export function findWC2026Team(name: string): WC2026Team | undefined {

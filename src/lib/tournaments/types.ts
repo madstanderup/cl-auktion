@@ -10,7 +10,13 @@ export type TournamentTeam = {
   mean: number;
   median: number;
   stdDev: number;
-  fairPrice: number;
+  /**
+   * Holdets andel af den samlede møntpulje — summerer til 1 over alle hold.
+   * Fair pris i mønter afhænger af hvor mange der byder (puljen er antal
+   * spillere × 1.000), så den regnes med fairPriceFor() i stedet for at ligge
+   * fast i kataloget.
+   */
+  fairShare: number;
   flag: string;
   aliases: string[];
 };

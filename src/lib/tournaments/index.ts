@@ -7,6 +7,7 @@ import { clCalcTeamPoints, clTeamMatchPoints, clComputeEliminated, clLeagueTop8,
 import type { TournamentConfig, TournamentId } from "./types";
 
 export type { TournamentConfig, TournamentId, TournamentTeam, ScoringRules, StageDef } from "./types";
+export { STARTING_COINS, fairPriceFor, coinPool } from "./fair-price";
 
 /** Registrerede turneringer. */
 const REGISTRY: Record<string, TournamentConfig> = {

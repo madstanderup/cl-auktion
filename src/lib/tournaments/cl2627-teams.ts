@@ -111,8 +111,6 @@ const SIM_STATS: Record<string, { mean: number; median: number; stdDev: number }
 const statsFor = (name: string) => SIM_STATS[name] ?? { mean: 0, median: 0, stdDev: 0 };
 
 const TOTAL_MEAN = RAW.reduce((s, t) => s + statsFor(t.name).mean, 0);
-/** Skalering så fairPrice-summen matcher ~4.000 mønter (som VM). */
-const FAIR_SCALE = TOTAL_MEAN > 0 ? 4000 / TOTAL_MEAN : 0;
 
 export const CL2627_TEAMS: TournamentTeam[] = RAW.map((t) => {
   const s = statsFor(t.name);
@@ -123,7 +121,7 @@ export const CL2627_TEAMS: TournamentTeam[] = RAW.map((t) => {
     mean: s.mean,
     median: s.median,
     stdDev: s.stdDev,
-    fairPrice: Math.round(s.mean * FAIR_SCALE * 10) / 10,
+    fairShare: TOTAL_MEAN > 0 ? s.mean / TOTAL_MEAN : 0,
     flag: t.flag,
     aliases: t.aliases,
   };

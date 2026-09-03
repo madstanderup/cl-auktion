@@ -9,11 +9,9 @@ import { simulateStandings, type PlayerSim } from "@/lib/wc2026-teams";
 import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
 import { simulateClTournament } from "@/lib/tournaments/cl-sim";
 import { stableColorIndex, PLAYER_COLORS } from "@/lib/player-colors";
-import { getTournament, getTournamentForGame, calcPointsForTournament, eliminatedForTournament, type TournamentConfig } from "@/lib/tournaments";
+import { getTournament, getTournamentForGame, calcPointsForTournament, eliminatedForTournament, fairPriceFor, coinPool, STARTING_COINS, type TournamentConfig } from "@/lib/tournaments";
 import { formatStake } from "@/lib/side-bets";
 import { cn } from "@/lib/utils";
-
-const STARTING_COINS = 1000;
 
 const PLAYER_THEMES = [
   { header: "bg-gradient-to-r from-yellow-600 to-amber-700",   accent: "text-amber-300",  border: "border-amber-500/40",  badge: "bg-amber-500/20 text-amber-200" },
@@ -38,6 +36,7 @@ type TeamEntry = {
   mean: number;
   median: number;
   stdDev: number;
+  /** Fair pris i mønter ved dette spils antal spillere. */
   fairPrice: number;
 };
 
@@ -159,6 +158,9 @@ export default function SummaryPage() {
 
     const teamNameById = new Map((teamRows ?? []).map((t) => [String(t.id), String(t.name)]));
 
+    // Fair pris skalerer med feltets størrelse: puljen er antal spillere × 1.000 mønter.
+    const playerCount = (playersRes.data ?? []).length;
+
     // Bud: (teamName, playerId) → pricePaid  (highest bid_phase, latest created_at — already sorted)
     const allBids = (bidsRes.data ?? []) as { player_id: string; team_name: string; amount: number; bid_phase: number; created_at: string }[];
     const paidKey = (tname: string, pid: string) => `${tname}||${pid}`;
@@ -184,7 +186,7 @@ export default function SummaryPage() {
         mean: wc?.mean ?? 0,
         median: wc?.median ?? 0,
         stdDev: wc?.stdDev ?? 0,
-        fairPrice: wc?.fairPrice ?? 0,
+        fairPrice: fairPriceFor(wc, playerCount),
       };
       const arr = teamsByOwner.get(pid) ?? [];
       arr.push(entry);
@@ -623,7 +625,7 @@ export default function SummaryPage() {
                       <div className="shrink-0 text-right">
                         <span className="tabular-nums font-semibold text-rose-300">{d.pricePaid} 🪙</span>
                         <span className="ml-2 tabular-nums text-xs text-slate-500">
-                          ({d.fairPrice} fair)
+                          ({Math.round(d.fairPrice)} fair)
                         </span>
                       </div>
                     </li>
@@ -635,6 +637,10 @@ export default function SummaryPage() {
                     <span>Total mønter i spil</span>
                     <span className="tabular-nums font-medium text-slate-300">{totalCoins.toLocaleString("da-DK")}</span>
                   </div>
+                  <p className="mt-2 text-[0.65rem] leading-relaxed text-slate-600">
+                    Fair pris er holdets andel af puljen på {coinPool(results.length).toLocaleString("da-DK")} mønter
+                    ({results.length} spillere × {STARTING_COINS.toLocaleString("da-DK")}).
+                  </p>
                 </div>
               </div>
 

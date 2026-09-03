@@ -393,6 +393,51 @@ export default function AuctionPage() {
     };
   }, [applyAuctionRow, gameId]);
 
+  // --- Refresh-koordinator --------------------------------------------
+  // Et enkelt refresh koster 10 REST-kald (4 + 3 + 3). Realtime sender en byge
+  // af events naar en runde afgoeres — hvert bud rammer alle klienter — saa
+  // uden sammenlaegning bliver én runde til hundredvis af kald per klient.
+  // Her samles alt der ankommer indenfor 400 ms til ét refresh.
+  const roundRef = useRef<{ roundId: string | null; phase: number }>({
+    roundId: null,
+    phase: 0,
+  });
+  const realtimeReadyRef = useRef(false);
+  const refreshTimerRef = useRef<number | null>(null);
+  const pendingRefreshRef = useRef({ stats: false, ownership: false, teams: false });
+
+  useEffect(() => {
+    roundRef.current = {
+      roundId: auction?.current_round_id ?? null,
+      phase: auction?.current_phase ?? 0,
+    };
+  }, [auction?.current_round_id, auction?.current_phase]);
+
+  const scheduleRefresh = useCallback(
+    (gid: string, what: { stats?: boolean; ownership?: boolean; teams?: boolean }) => {
+      const pending = pendingRefreshRef.current;
+      if (what.stats) pending.stats = true;
+      if (what.ownership) pending.ownership = true;
+      if (what.teams) pending.teams = true;
+      if (refreshTimerRef.current != null) return;
+      refreshTimerRef.current = window.setTimeout(() => {
+        refreshTimerRef.current = null;
+        const run = { ...pendingRefreshRef.current };
+        pendingRefreshRef.current = { stats: false, ownership: false, teams: false };
+        if (run.stats) void loadRoomStats(gid, roundRef.current.roundId, roundRef.current.phase);
+        if (run.ownership) void loadOwnershipSummary(gid);
+        if (run.teams) void loadTeamList(gid);
+      }, 400);
+    },
+    [loadOwnershipSummary, loadRoomStats, loadTeamList],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (!gameId) return;
     void loadRoomStats(gameId, auction?.current_round_id ?? null, auction?.current_phase ?? 0);
@@ -406,17 +451,20 @@ export default function AuctionPage() {
 
   useEffect(() => {
     if (!gameId) return;
-    // Fallback: hvis Realtime events ikke leveres for en tabel i miljøet,
-    // holder vi alligevel oversigt og status friske for alle spillere.
-    const interval = window.setInterval(() => {
-      void loadRoomStats(gameId, auction?.current_round_id ?? null, auction?.current_phase ?? 0);
-      void loadOwnershipSummary(gameId);
-      void loadTeamList(gameId);
-    }, 2500);
-    return () => {
-      window.clearInterval(interval);
+    // Sikkerhedsnet hvis Realtime ikke leverer events for en tabel i miljøet.
+    // Naar realtime-kanalen er forbundet er det kun et langsomt sanity-tjek;
+    // falder forbindelsen ud, poller vi taet igen som foer.
+    let timer: number | null = null;
+    const delay = () => (realtimeReadyRef.current ? 20_000 : 3_000);
+    const tick = () => {
+      scheduleRefresh(gameId, { stats: true, ownership: true, teams: true });
+      timer = window.setTimeout(tick, delay());
     };
-  }, [auction?.current_phase, auction?.current_round_id, gameId, loadOwnershipSummary, loadRoomStats, loadTeamList]);
+    timer = window.setTimeout(tick, delay());
+    return () => {
+      if (timer != null) window.clearTimeout(timer);
+    };
+  }, [gameId, scheduleRefresh]);
 
   useEffect(() => {
     if (!gameId) return;
@@ -468,10 +516,7 @@ export default function AuctionPage() {
           table: "players",
           filter: `game_id=eq.${gameId}`,
         },
-        () => {
-          void loadRoomStats(gameId, auction?.current_round_id ?? null, auction?.current_phase ?? 0);
-          void loadOwnershipSummary(gameId);
-        },
+        () => scheduleRefresh(gameId, { stats: true, ownership: true }),
       )
       .on(
         "postgres_changes",
@@ -481,11 +526,7 @@ export default function AuctionPage() {
           table: "game_teams",
           filter: `game_id=eq.${gameId}`,
         },
-        () => {
-          void loadRoomStats(gameId, auction?.current_round_id ?? null, auction?.current_phase ?? 0);
-          void loadOwnershipSummary(gameId);
-          void loadTeamList(gameId);
-        },
+        () => scheduleRefresh(gameId, { stats: true, ownership: true, teams: true }),
       )
       .on(
         "postgres_changes",
@@ -495,14 +536,18 @@ export default function AuctionPage() {
           table: "auction_room_bids",
           filter: `game_id=eq.${gameId}`,
         },
-        () => void loadRoomStats(gameId, auction?.current_round_id ?? null, auction?.current_phase ?? 0),
+        () => scheduleRefresh(gameId, { stats: true }),
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Styrer hvor taet sikkerhedsnettet poller.
+        realtimeReadyRef.current = status === "SUBSCRIBED";
+      });
 
     return () => {
+      realtimeReadyRef.current = false;
       void supabase.removeChannel(channel);
     };
-  }, [auction?.current_phase, auction?.current_round_id, gameId, loadOwnershipSummary, loadRoomStats, loadTeamList]);
+  }, [gameId, scheduleRefresh]);
 
   const isTiedPlayer = Boolean(
     playerId && auction?.tied_player_ids?.includes(playerId),

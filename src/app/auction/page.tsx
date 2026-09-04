@@ -158,125 +158,63 @@ export default function AuctionPage() {
     });
   }, []);
 
-  const loadRoomStats = useCallback(
+  // Ét RPC-kald henter hele rummets tilstand. Det samme kostede foer 10
+  // REST-kald fordelt paa tre loaders, hvoraf to hentede de samme tabeller
+  // (game_teams og teams) i hvert eneste refresh.
+  const loadSnapshot = useCallback(
     async (gid: string, roundId: string | null, phase: number) => {
-      // Hent spiller-id'er frem for et raekketal: en spiller der retter sit bud
-      // indsaetter en NY raekke, saa count(*) taeller samme spiller flere gange.
-      const bidsQuery: PromiseLike<{ data: { player_id: unknown }[] | null }> = roundId
-        ? supabase
-            .from("auction_room_bids")
-            .select("player_id")
-            .eq("game_id", gid)
-            .eq("round_id", roundId)
-            .eq("bid_phase", phase)
-        : Promise.resolve({ data: [] });
+      const { data, error } = await supabase.rpc("get_auction_room_snapshot", {
+        p_game_id: gid,
+        p_round_id: roundId,
+        p_bid_phase: phase,
+      });
+      if (error || !data) return;
 
-      const [{ count: teamsTotal }, { count: teamsWithoutOwner }, { count: playersTotal }, bidsRes] =
-        await Promise.all([
-          supabase
-            .from("game_teams")
-            .select("*", { count: "exact", head: true })
-            .eq("game_id", gid),
-          supabase
-            .from("game_teams")
-            .select("*", { count: "exact", head: true })
-            .eq("game_id", gid)
-            .is("owner_player_id", null)
-            .eq("withdrawn", false),
-          supabase
-            .from("players")
-            .select("*", { count: "exact", head: true })
-            .eq("game_id", gid),
-          bidsQuery,
-        ]);
+      const snap = data as {
+        teamsTotal?: number;
+        teamsWithoutOwner?: number;
+        playersTotal?: number;
+        bidderIds?: unknown[];
+        ownership?: { playerId: string; playerName: string; coins: number; teams: string[] }[];
+        teamList?: {
+          teamId: string;
+          name: string;
+          ownerName: string | null;
+          withdrawn: boolean;
+        }[];
+      };
 
       setRoomStats({
-        teamsTotal: teamsTotal ?? 0,
-        teamsWithoutOwner: teamsWithoutOwner ?? 0,
-        playersTotal: playersTotal ?? 0,
-        bidderIds: [...new Set((bidsRes.data ?? []).map((b) => String(b.player_id)))],
+        teamsTotal: Number(snap.teamsTotal ?? 0),
+        teamsWithoutOwner: Number(snap.teamsWithoutOwner ?? 0),
+        playersTotal: Number(snap.playersTotal ?? 0),
+        bidderIds: (snap.bidderIds ?? []).map((id) => String(id)),
       });
+
+      // Sorteringen bliver i klienten: localeCompare("da") placerer æ/ø/å
+      // der hvor spillerne forventer, uafhaengigt af databasens collation.
+      setOwnershipSummary(
+        (snap.ownership ?? []).map((row) => ({
+          playerId: String(row.playerId),
+          playerName: String(row.playerName),
+          coins: Number(row.coins),
+          teams: [...(row.teams ?? [])].sort((a, b) => a.localeCompare(b, "da")),
+        })),
+      );
+
+      setTeamList(
+        (snap.teamList ?? [])
+          .map((row) => ({
+            teamId: String(row.teamId),
+            name: String(row.name),
+            ownerName: row.ownerName == null ? null : String(row.ownerName),
+            withdrawn: row.withdrawn === true,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name, "da")),
+      );
     },
     [],
   );
-
-  const loadOwnershipSummary = useCallback(async (gid: string) => {
-    const { data: playersData } = await supabase
-      .from("players")
-      .select("id,name,coins")
-      .eq("game_id", gid)
-      .order("name", { ascending: true });
-
-    const { data: gtRows } = await supabase
-      .from("game_teams")
-      .select("owner_player_id, team_id")
-      .eq("game_id", gid)
-      .not("owner_player_id", "is", null);
-
-    const teamIds = [...new Set((gtRows ?? []).map((r) => String(r.team_id)))];
-    const { data: teamNames } =
-      teamIds.length > 0
-        ? await supabase.from("teams").select("id,name").in("id", teamIds)
-        : { data: [] as { id: string; name: string }[] };
-
-    const nameByTeamId = new Map((teamNames ?? []).map((t) => [String(t.id), String(t.name)]));
-
-    const teamsByOwner = new Map<string, string[]>();
-    for (const row of gtRows ?? []) {
-      if (!row.owner_player_id) continue;
-      const pid = String(row.owner_player_id);
-      const nm = nameByTeamId.get(String(row.team_id));
-      if (!nm) continue;
-      const existing = teamsByOwner.get(pid) ?? [];
-      existing.push(nm);
-      teamsByOwner.set(pid, existing);
-    }
-
-    const players = (playersData ?? []) as { id: string; name: string; coins: number }[];
-    const summary = players.map((row) => ({
-      playerId: row.id,
-      playerName: row.name,
-      coins: row.coins,
-      teams: (teamsByOwner.get(row.id) ?? []).sort((a, b) => a.localeCompare(b, "da")),
-    }));
-    setOwnershipSummary(summary);
-  }, []);
-
-  const loadTeamList = useCallback(async (gid: string) => {
-    const { data: gtRows } = await supabase
-      .from("game_teams")
-      .select("team_id, owner_player_id, withdrawn")
-      .eq("game_id", gid);
-    if (!gtRows) return;
-
-    const teamIds = [...new Set(gtRows.map((r) => String(r.team_id)))];
-    const { data: teamNames } =
-      teamIds.length > 0
-        ? await supabase.from("teams").select("id,name").in("id", teamIds)
-        : { data: [] as { id: string; name: string }[] };
-    const nameByTeamId = new Map((teamNames ?? []).map((t) => [String(t.id), String(t.name)]));
-
-    const ownerIds = [
-      ...new Set(gtRows.filter((r) => r.owner_player_id).map((r) => String(r.owner_player_id))),
-    ];
-    const { data: ownerRows } =
-      ownerIds.length > 0
-        ? await supabase.from("players").select("id,name").in("id", ownerIds)
-        : { data: [] as { id: string; name: string }[] };
-    const nameByOwnerId = new Map((ownerRows ?? []).map((p) => [String(p.id), String(p.name)]));
-
-    const list = gtRows
-      .map((r) => ({
-        teamId: String(r.team_id),
-        name: nameByTeamId.get(String(r.team_id)) ?? "?",
-        ownerName: r.owner_player_id
-          ? (nameByOwnerId.get(String(r.owner_player_id)) ?? "?")
-          : null,
-        withdrawn: r.withdrawn === true,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name, "da"));
-    setTeamList(list);
-  }, []);
 
   // Henter bud for en afgjort runde og gemmer dem i lastResult + revealedBids.
   // Kaldes direkte fra realtime-callback så React-batching ikke kan forhindre det.
@@ -394,17 +332,15 @@ export default function AuctionPage() {
   }, [applyAuctionRow, gameId]);
 
   // --- Refresh-koordinator --------------------------------------------
-  // Et enkelt refresh koster 10 REST-kald (4 + 3 + 3). Realtime sender en byge
-  // af events naar en runde afgoeres — hvert bud rammer alle klienter — saa
-  // uden sammenlaegning bliver én runde til hundredvis af kald per klient.
-  // Her samles alt der ankommer indenfor 400 ms til ét refresh.
+  // Realtime sender en byge af events naar en runde afgoeres — hvert bud
+  // rammer alle klienter. Her samles alt der ankommer indenfor 400 ms til
+  // ét snapshot-kald.
   const roundRef = useRef<{ roundId: string | null; phase: number }>({
     roundId: null,
     phase: 0,
   });
   const realtimeReadyRef = useRef(false);
   const refreshTimerRef = useRef<number | null>(null);
-  const pendingRefreshRef = useRef({ stats: false, ownership: false, teams: false });
 
   useEffect(() => {
     roundRef.current = {
@@ -414,22 +350,14 @@ export default function AuctionPage() {
   }, [auction?.current_round_id, auction?.current_phase]);
 
   const scheduleRefresh = useCallback(
-    (gid: string, what: { stats?: boolean; ownership?: boolean; teams?: boolean }) => {
-      const pending = pendingRefreshRef.current;
-      if (what.stats) pending.stats = true;
-      if (what.ownership) pending.ownership = true;
-      if (what.teams) pending.teams = true;
+    (gid: string) => {
       if (refreshTimerRef.current != null) return;
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
-        const run = { ...pendingRefreshRef.current };
-        pendingRefreshRef.current = { stats: false, ownership: false, teams: false };
-        if (run.stats) void loadRoomStats(gid, roundRef.current.roundId, roundRef.current.phase);
-        if (run.ownership) void loadOwnershipSummary(gid);
-        if (run.teams) void loadTeamList(gid);
+        void loadSnapshot(gid, roundRef.current.roundId, roundRef.current.phase);
       }, 400);
     },
-    [loadOwnershipSummary, loadRoomStats, loadTeamList],
+    [loadSnapshot],
   );
 
   useEffect(() => {
@@ -440,14 +368,8 @@ export default function AuctionPage() {
 
   useEffect(() => {
     if (!gameId) return;
-    void loadRoomStats(gameId, auction?.current_round_id ?? null, auction?.current_phase ?? 0);
-  }, [auction?.current_phase, auction?.current_round_id, gameId, loadRoomStats]);
-
-  useEffect(() => {
-    if (!gameId) return;
-    void loadOwnershipSummary(gameId);
-    void loadTeamList(gameId);
-  }, [gameId, loadOwnershipSummary, loadTeamList]);
+    void loadSnapshot(gameId, auction?.current_round_id ?? null, auction?.current_phase ?? 0);
+  }, [auction?.current_phase, auction?.current_round_id, gameId, loadSnapshot]);
 
   useEffect(() => {
     if (!gameId) return;
@@ -457,7 +379,7 @@ export default function AuctionPage() {
     let timer: number | null = null;
     const delay = () => (realtimeReadyRef.current ? 20_000 : 3_000);
     const tick = () => {
-      scheduleRefresh(gameId, { stats: true, ownership: true, teams: true });
+      scheduleRefresh(gameId);
       timer = window.setTimeout(tick, delay());
     };
     timer = window.setTimeout(tick, delay());
@@ -516,7 +438,7 @@ export default function AuctionPage() {
           table: "players",
           filter: `game_id=eq.${gameId}`,
         },
-        () => scheduleRefresh(gameId, { stats: true, ownership: true }),
+        () => scheduleRefresh(gameId),
       )
       .on(
         "postgres_changes",
@@ -526,7 +448,7 @@ export default function AuctionPage() {
           table: "game_teams",
           filter: `game_id=eq.${gameId}`,
         },
-        () => scheduleRefresh(gameId, { stats: true, ownership: true, teams: true }),
+        () => scheduleRefresh(gameId),
       )
       .on(
         "postgres_changes",
@@ -536,7 +458,7 @@ export default function AuctionPage() {
           table: "auction_room_bids",
           filter: `game_id=eq.${gameId}`,
         },
-        () => scheduleRefresh(gameId, { stats: true }),
+        () => scheduleRefresh(gameId),
       )
       .subscribe((status) => {
         // Styrer hvor taet sikkerhedsnettet poller.
@@ -862,12 +784,18 @@ export default function AuctionPage() {
         .eq("game_id", gameId)
         .order("updated_at", { ascending: false })
         .limit(1);
-      if (data?.[0]) applyAuctionRow(data[0] as Record<string, unknown>);
+      const row = data?.[0] as Record<string, unknown> | undefined;
+      if (row) applyAuctionRow(row);
+      // Hent snapshot med runden fra SVARET, ikke fra roundRef: den er foerst
+      // opdateret efter naeste render, og en admin-handling skifter typisk runde.
+      void loadSnapshot(
+        gameId,
+        row?.current_round_id ? String(row.current_round_id) : null,
+        Number(row?.current_phase ?? 0),
+      );
     })();
-    void loadOwnershipSummary(gameId);
-    void loadTeamList(gameId);
     if (playerId) void loadPlayer(playerId, gameId);
-  }, [applyAuctionRow, gameId, loadOwnershipSummary, loadPlayer, loadTeamList, playerId]);
+  }, [applyAuctionRow, gameId, loadPlayer, loadSnapshot, playerId]);
 
   if (!gameId) {
     return (

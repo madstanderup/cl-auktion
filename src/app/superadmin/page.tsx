@@ -23,6 +23,15 @@ type GameRow = {
   auction_status: string | null;
 };
 
+type SyncResponse = {
+  ok?: boolean;
+  synced?: number;
+  totalFromApi?: number;
+  relevantFromApi?: number;
+  seededFixtures?: number;
+  error?: string;
+};
+
 const SUPERADMIN_EMAIL = "madstanderup@gmail.com";
 
 const AUCTION_STATUS_LABEL: Record<string, { label: string; color: string }> = {
@@ -191,17 +200,30 @@ export default function SuperAdminPage() {
     setActionLoading("sync-matches");
     setMessage(null);
     try {
-      const res = await fetch("/api/sync-matches", { method: "POST" });
-      const text = await res.text();
-      let body: { ok?: boolean; synced?: number; totalFromApi?: number; relevantFromApi?: number; error?: string } = {};
-      try { body = JSON.parse(text) as typeof body; } catch { /* ignore */ }
-      if (body.ok) {
-        setMessage(`Kampe synkroniseret ✓ — ${body.synced} opdateringer, ${body.relevantFromApi ?? 0} relevante kampe fra API (${body.totalFromApi ?? 0} i alt).`);
-      } else {
-        setMessage(body.error ?? `Fejl ved synkronisering (HTTP ${res.status}): ${text.slice(0, 200)}`);
-      }
-    } catch (err) {
-      setMessage(`Netværksfejl: ${String(err)}`);
+      // Hver turnering har sin egen kilde: VM 2026 henter fra Zafronix,
+      // CL 26/27 fra UEFA. Knappen skal ramme dem begge — ellers står
+      // CL-stillingen stille, selv om syncen melder "ok".
+      const results = await Promise.all(
+        ([
+          ["VM 2026", "/api/sync-matches"],
+          ["CL 26/27", "/api/sync-matches-cl"],
+        ] as const).map(async ([label, url]) => {
+          try {
+            const res = await fetch(url, { method: "POST" });
+            const text = await res.text();
+            let body: SyncResponse = {};
+            try { body = JSON.parse(text) as SyncResponse; } catch { /* ignore */ }
+            if (body.ok) {
+              const seeded = body.seededFixtures ? `, ${body.seededFixtures} kampe oprettet` : "";
+              return `${label}: ${body.synced ?? 0} opdateringer (${body.relevantFromApi ?? 0} kampe fra API${seeded})`;
+            }
+            return `${label}: FEJL — ${body.error ?? `HTTP ${res.status}: ${text.slice(0, 150)}`}`;
+          } catch (err) {
+            return `${label}: netværksfejl — ${String(err)}`;
+          }
+        }),
+      );
+      setMessage(results.join(" · "));
     } finally {
       setActionLoading(null);
     }
@@ -271,7 +293,7 @@ export default function SuperAdminPage() {
           </div>
           <div className="flex items-center justify-between gap-4 px-4 py-4">
             <p className="text-xs text-slate-400">
-              Henter alle VM 2026-kampe (planlagte + afsluttede) fra Zafronix og gemmer dem i databasen.
+              Henter kampe (planlagte + afsluttede) for både VM 2026 (Zafronix) og CL 26/27 (UEFA), gemmer dem i databasen og genberegner point.
             </p>
             <Button
               type="button"

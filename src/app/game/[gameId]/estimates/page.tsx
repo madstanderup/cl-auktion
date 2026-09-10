@@ -9,9 +9,10 @@ import { canBuildBracket, simulateTeamPoints, buildStrengthMap } from "@/lib/bra
 import { simulateClTeamPoints } from "@/lib/tournaments/cl-sim";
 import { colorByPlayerName } from "@/lib/player-colors";
 import { getTournamentForGame, calcPointsForTournament, eliminatedForTournament } from "@/lib/tournaments";
+import { buildRoundCheckpoints, estimateTeamPointsPerRound } from "@/lib/est-rounds";
 import { cn } from "@/lib/utils";
 
-type Row = { name: string; flag: string; owner: string | null; color?: string; current: number; est: number; startEst: number; out: boolean };
+type Row = { canon: string; name: string; flag: string; owner: string | null; color?: string; current: number; est: number; startEst: number; out: boolean };
 
 /** Hvordan "Est. nu" er beregnet: WC-bracket-sim, CL-turnerings-sim eller før-turnerings-forventning. */
 type EstMode = "bracket" | "clsim" | "pre";
@@ -25,6 +26,9 @@ export default function EstimatesPage() {
   const [gameLabel, setGameLabel] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [estMode, setEstMode] = useState<EstMode>("pre");
+  /** Estimatet pr. hold ved hvert runde-checkpoint (retrospektiv simulering). */
+  const [roundEst, setRoundEst] = useState<{ labels: string[]; byTeam: Record<string, number[]> } | null>(null);
+  const [roundEstBusy, setRoundEstBusy] = useState(false);
 
   useEffect(() => { if (gameId) void load(); }, [gameId]);
 
@@ -36,7 +40,7 @@ export default function EstimatesPage() {
       supabase.from("game_teams").select("team_id, owner_player_id").eq("game_id", gameId).not("owner_player_id", "is", null),
       supabase.from("teams").select("id, name"),
       supabase.from("players").select("id, name").eq("game_id", gameId),
-      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").eq("game_id", gameId),
+      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status,match_date").eq("game_id", gameId),
     ]);
 
     const g = gameRes.data as { label?: string | null; invite_code?: string } | null;
@@ -54,7 +58,8 @@ export default function EstimatesPage() {
       result_type: m.result_type ? String(m.result_type) : null,
       winner_side: m.winner_side ? String(m.winner_side) : null,
       status: String(m.status),
-    })) as TMatch[];
+      match_date: m.match_date ? String(m.match_date) : null,
+    })) as (TMatch & { match_date: string | null })[];
 
     const norm = (n: string) => (cfg.findTeam(n)?.name ?? n).toLowerCase();
     const eliminated = eliminatedForTournament(cfg, matches);
@@ -84,6 +89,7 @@ export default function EstimatesPage() {
       const startEst = wc?.mean ?? 0;
       const estVal = mode !== "pre" ? (est.get(canon) ?? cur) : startEst;
       return {
+        canon,
         name: wc?.name ?? raw,
         flag: wc?.flag ?? "🏳",
         owner,
@@ -97,6 +103,21 @@ export default function EstimatesPage() {
 
     setRows(built);
     setLoading(false);
+
+    // ── Estimatets udvikling runde for runde (retrospektiv simulering) ──
+    // Ved hvert checkpoint låses kampene til og med runden, resten simuleres —
+    // altså det estimat holdet ville have haft dengang.
+    setRoundEst(null);
+    const checkpoints = buildRoundCheckpoints(cfg, matches);
+    if (checkpoints.length >= 2 && owned.length > 0) {
+      setRoundEstBusy(true);
+      // Kør async så tabellen ovenfor er tegnet først
+      setTimeout(() => {
+        const values = estimateTeamPointsPerRound(cfg, checkpoints, { teamNames: owned.map((o) => o.raw) });
+        setRoundEst({ labels: checkpoints.map((c) => c.label), byTeam: Object.fromEntries(values) });
+        setRoundEstBusy(false);
+      }, 0);
+    }
   }
 
   return (
@@ -197,6 +218,80 @@ export default function EstimatesPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Estimatets udvikling runde for runde */}
+            {(roundEstBusy || (roundEst && roundEst.labels.length >= 2)) && (
+              <div className="mt-6 rounded-2xl border border-white/[0.08] bg-slate-950/55 p-5">
+                <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-emerald-300/80">
+                  📊 Estimatets udvikling runde for runde
+                </p>
+                <p className="mb-4 text-[0.65rem] leading-relaxed text-slate-500">
+                  Hvad simuleringen ville have estimeret holdets slutpoint til efter hver runde. Kampe til og med
+                  runden er låst, resten er simuleret. <span className="text-emerald-400">Grøn</span> = estimatet steg
+                  i runden, <span className="text-red-400">rød</span> = det faldt.
+                </p>
+
+                {!roundEst ? (
+                  <div className="flex items-center justify-center gap-2 py-10 text-xs text-slate-500">
+                    <Loader2 className="size-4 animate-spin text-emerald-400/60" />
+                    Simulerer hver runde...
+                  </div>
+                ) : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-max border-collapse text-sm">
+                        <thead>
+                          <tr className="border-b border-white/[0.08] text-[0.6rem] uppercase tracking-wider text-slate-500">
+                            <th className="sticky left-0 z-10 bg-slate-950 px-3 py-3 text-left">Hold</th>
+                            {roundEst.labels.map((lab) => (
+                              <th key={lab} className="whitespace-nowrap px-3 py-3 text-right">{lab}</th>
+                            ))}
+                            <th className="whitespace-nowrap px-3 py-3 text-right text-emerald-400/80">Samlet</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/[0.04]">
+                          {rows.map((r) => {
+                            const vals = roundEst.byTeam[r.canon] ?? [];
+                            const diff = (vals.at(-1) ?? 0) - (vals[0] ?? 0);
+                            return (
+                              <tr key={r.canon} className="hover:bg-white/[0.02]">
+                                <td className="sticky left-0 z-10 whitespace-nowrap bg-slate-950 px-3 py-2.5">
+                                  <span className={cn("mr-1.5", r.out && "opacity-50")}>{r.flag}</span>
+                                  <span className={cn("font-medium", r.out ? "text-slate-500 line-through" : "text-slate-200")}>{r.name}</span>
+                                </td>
+                                {roundEst.labels.map((lab, i) => {
+                                  const v = vals[i];
+                                  const prev = i > 0 ? vals[i - 1] : undefined;
+                                  const delta = v !== undefined && prev !== undefined ? v - prev : 0;
+                                  return (
+                                    <td
+                                      key={lab}
+                                      className={cn(
+                                        "whitespace-nowrap px-3 py-2.5 text-right tabular-nums",
+                                        delta > 0 ? "font-semibold text-emerald-300" : delta < 0 ? "font-semibold text-red-300" : "text-slate-400",
+                                      )}
+                                      title={delta !== 0 ? `${delta > 0 ? "+" : ""}${delta.toLocaleString("da-DK")} i denne runde` : undefined}
+                                    >
+                                      {v !== undefined ? v.toLocaleString("da-DK") : "–"}
+                                    </td>
+                                  );
+                                })}
+                                <td className={cn("whitespace-nowrap px-3 py-2.5 text-right font-bold tabular-nums", diff > 0 ? "text-emerald-400" : diff < 0 ? "text-red-400" : "text-slate-600")}>
+                                  {diff > 0 ? "+" : ""}{diff.toLocaleString("da-DK")}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-3 text-center text-[0.65rem] text-slate-600">
+                      {roundEst.labels.length} runder · hold musen over et tal for at se rundens ændring
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
           </>
         )}
       </main>

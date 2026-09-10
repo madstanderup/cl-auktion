@@ -9,6 +9,7 @@ import { simulateStandings, type PlayerSim } from "@/lib/wc2026-teams";
 import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
 import { simulateClTournament } from "@/lib/tournaments/cl-sim";
 import { stableColorIndex, PLAYER_COLORS } from "@/lib/player-colors";
+import { buildRoundCheckpoints, estimatePlayerPointsPerRound } from "@/lib/est-rounds";
 import { getTournament, getTournamentForGame, calcPointsForTournament, eliminatedForTournament, fairPriceFor, coinPool, STARTING_COINS, type TournamentConfig } from "@/lib/tournaments";
 import { formatStake } from "@/lib/side-bets";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ type MatchRow = {
   home_team: string; away_team: string; stage: string;
   home_score: number | null; away_score: number | null;
   result_type: string | null; winner_side: string | null; status: string;
+  match_date: string | null;
 };
 
 type TeamEntry = {
@@ -106,6 +108,9 @@ export default function SummaryPage() {
   const [placeProb, setPlaceProb] = useState<Record<string, number[]>>({});
   const [colorIdx, setColorIdx] = useState<Map<string, number>>(new Map());
   const [history, setHistory] = useState<SnapshotRow[]>([]);
+  /** Forventet slutpoint pr. spiller ved hvert runde-checkpoint (retrospektiv simulering). */
+  const [estRounds, setEstRounds] = useState<{ labels: string[]; byPlayer: Record<string, number[]> } | null>(null);
+  const [estRoundsBusy, setEstRoundsBusy] = useState(false);
   const [eliminated, setEliminated] = useState<Set<string>>(new Set());
   const [sideBets, setSideBets] = useState<SideBetRow[]>([]);
   const [playerNameById, setPlayerNameById] = useState<Map<string, string>>(new Map());
@@ -131,7 +136,7 @@ export default function SummaryPage() {
       supabase.from("players").select("id, name, coins").eq("game_id", gameId),
       supabase.from("game_teams").select("owner_player_id, team_id").eq("game_id", gameId).not("owner_player_id", "is", null),
       supabase.from("auction_room_bids").select("player_id, team_name, amount, bid_phase, created_at").eq("game_id", gameId).order("bid_phase", { ascending: false }).order("created_at", { ascending: false }),
-      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status").eq("game_id", gameId),
+      supabase.from("wc_matches").select("home_team,away_team,stage,home_score,away_score,result_type,winner_side,status,match_date").eq("game_id", gameId),
       supabase.from("side_bets").select("id,bookie_player_id,better_player_id,description,odds,stake,currency,status,created_at").eq("game_id", gameId).eq("status", "accepted").order("created_at", { ascending: true }),
     ]);
 
@@ -290,6 +295,25 @@ export default function SummaryPage() {
     setLoading(false);
 
     setEliminated(eliminated);
+
+    // ── Forventet slutpoint runde for runde (retrospektiv simulering) ──
+    // Ét checkpoint pr. spillet runde: kampene til og med runden låses, resten
+    // simuleres — altså præcis det estimat man ville have haft dengang.
+    setEstRounds(null);
+    const checkpoints = buildRoundCheckpoints(cfg, allMatches);
+    if (checkpoints.length >= 2) {
+      const ownedByPlayer = new Map<string, string[]>(partial.map((pr) => [pr.playerId, pr.teams.map((t) => t.name)]));
+      const ownerByTeam = new Map<string, string>();
+      for (const pr of partial) for (const t of pr.teams) ownerByTeam.set(normName(t.name), pr.playerId);
+      const roundPlayerIds = partial.map((pr) => pr.playerId);
+      setEstRoundsBusy(true);
+      // Kør async så resten af siden er tegnet først
+      setTimeout(() => {
+        const values = estimatePlayerPointsPerRound(cfg, checkpoints, { playerIds: roundPlayerIds, ownedByPlayer, ownerByTeam });
+        setEstRounds({ labels: checkpoints.map((c) => c.label), byPlayer: Object.fromEntries(values) });
+        setEstRoundsBusy(false);
+      }, 0);
+    }
 
     // Gem dagligt snapshot af vindersandsynlighed (ét pr. spil pr. dag) + hent historik
     const today = new Date().toLocaleDateString("sv-SE");
@@ -835,64 +859,104 @@ export default function SummaryPage() {
                 );
               })()}
 
-              {/* Forventet slutpoint over tid */}
-              {(() => {
-                const dates = [...new Set(history.map((h) => h.snapshot_date))].sort();
-                if (dates.length < 2) return null;
-                const CHART_COLORS = PLAYER_COLORS;
+              {/* Forventet slutpoint runde for runde */}
+              {(estRoundsBusy || (estRounds && estRounds.labels.length >= 2)) && (() => {
                 const order = [...results].sort((a, b) => b.winProb - a.winProb);
-                const byPlayerDate = new Map<string, number>();
-                for (const h of history) byPlayerDate.set(`${h.player_id}|${h.snapshot_date}`, Number(h.expected_points));
-                const yMax = Math.max(1, ...history.map((h) => Number(h.expected_points)));
-                const W = 720, H = 250, padL = 44, padR = 12, padT = 12, padB = 28;
-                const plotW = W - padL - padR, plotH = H - padT - padB;
-                const x = (i: number) => padL + (dates.length === 1 ? plotW / 2 : (i / (dates.length - 1)) * plotW);
-                const y = (v: number) => padT + (1 - v / yMax) * plotH;
-                const fmt = (d: string) => { const dt = new Date(d); return `${dt.getDate()}/${dt.getMonth() + 1}`; };
-                const labelIdx = dates.length <= 4 ? dates.map((_, i) => i) : [0, Math.floor((dates.length - 1) / 2), dates.length - 1];
-                const gridVals = [0, 0.25, 0.5, 0.75, 1].map((g) => Math.round(g * yMax));
+                const colorOf = (playerId: string, idx: number) =>
+                  PLAYER_COLORS[(colorIdx.get(playerId) ?? idx) % PLAYER_COLORS.length];
 
                 return (
                   <div className="rounded-xl border border-white/10 bg-slate-950/70 p-5 sm:col-span-2">
-                    <p className="mb-4 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-emerald-300/80">
-                      📈 Forventet slutpoint over tid
+                    <p className="mb-1 text-[0.65rem] font-bold uppercase tracking-[0.2em] text-emerald-300/80">
+                      📊 Forventet slutpoint runde for runde
                     </p>
-                    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 260 }}>
-                      {gridVals.map((gv, gi) => (
-                        <g key={gi}>
-                          <line x1={padL} y1={y(gv)} x2={W - padR} y2={y(gv)} stroke="rgba(255,255,255,0.07)" strokeWidth={1} />
-                          <text x={padL - 6} y={y(gv) + 3} textAnchor="end" fontSize={10} fill="#64748b">{gv.toLocaleString("da-DK")}</text>
-                        </g>
-                      ))}
-                      {labelIdx.map((i) => (
-                        <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize={10} fill="#64748b">{fmt(dates[i])}</text>
-                      ))}
-                      {order.map((p, idx) => {
-                        const color = CHART_COLORS[(colorIdx.get(p.playerId) ?? idx) % CHART_COLORS.length];
-                        const pts = dates
-                          .map((d, i) => ({ i, v: byPlayerDate.get(`${p.playerId}|${d}`) }))
-                          .filter((q) => q.v !== undefined) as { i: number; v: number }[];
-                        if (pts.length === 0) return null;
-                        const path = pts.map((q, k) => `${k === 0 ? "M" : "L"} ${x(q.i).toFixed(1)} ${y(q.v).toFixed(1)}`).join(" ");
-                        return (
-                          <g key={p.playerId}>
-                            <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-                            {pts.map((q) => <circle key={q.i} cx={x(q.i)} cy={y(q.v)} r={2.5} fill={color} />)}
-                          </g>
-                        );
-                      })}
-                    </svg>
-                    <div className="mt-3 flex flex-wrap justify-center gap-x-4 gap-y-1.5">
-                      {order.map((p, idx) => (
-                        <span key={p.playerId} className="flex items-center gap-1.5 text-xs text-slate-300">
-                          <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: CHART_COLORS[(colorIdx.get(p.playerId) ?? idx) % CHART_COLORS.length] }} />
-                          {p.playerName}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="mt-3 text-center text-[0.65rem] text-slate-600">
-                      Forventet slutpoint (nuværende + simuleret resterende) pr. måling
+                    <p className="mb-4 text-[0.65rem] text-slate-500">
+                      Hvad simuleringen ville have estimeret hver spillers slutpoint til efter hver runde. Kampe
+                      til og med runden er låst, resten er simuleret — tallet i parentes er ændringen siden runden før.
                     </p>
+
+                    {!estRounds ? (
+                      <div className="flex items-center justify-center gap-2 py-10 text-xs text-slate-500">
+                        <Loader2 className="size-4 animate-spin text-emerald-400/60" />
+                        Simulerer hver runde...
+                      </div>
+                    ) : (
+                      <>
+                        <div className="overflow-x-auto">
+                          <table className="w-full min-w-max border-collapse text-xs">
+                            <thead>
+                              <tr className="border-b border-white/10">
+                                <th className="sticky left-0 z-10 bg-slate-950 px-2 py-2 text-left text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500">
+                                  Runde
+                                </th>
+                                {order.map((p, idx) => (
+                                  <th
+                                    key={p.playerId}
+                                    className="whitespace-nowrap px-3 py-2 text-right text-[0.65rem] font-semibold"
+                                    style={{ color: colorOf(p.playerId, idx) }}
+                                  >
+                                    {p.playerName}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/[0.04]">
+                              {estRounds.labels.map((lab, i) => {
+                                const rowVals = order.map((p) => estRounds.byPlayer[p.playerId]?.[i]);
+                                const leader = Math.max(...rowVals.map((v) => v ?? -Infinity));
+                                return (
+                                  <tr key={lab} className="hover:bg-white/[0.02]">
+                                    <td className="sticky left-0 z-10 whitespace-nowrap bg-slate-950 px-2 py-2 text-left font-medium text-slate-300">
+                                      {lab}
+                                    </td>
+                                    {order.map((p) => {
+                                      const vals = estRounds.byPlayer[p.playerId] ?? [];
+                                      const v = vals[i];
+                                      const prev = i > 0 ? vals[i - 1] : undefined;
+                                      const delta = v !== undefined && prev !== undefined ? v - prev : null;
+                                      return (
+                                        <td key={p.playerId} className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                                          <span className={cn("font-semibold", v !== undefined && v === leader ? "text-white" : "text-slate-300")}>
+                                            {v !== undefined ? v.toLocaleString("da-DK") : "–"}
+                                          </span>
+                                          {delta !== null && (
+                                            <span className={cn("ml-1.5 text-[0.6rem]", delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-slate-600")}>
+                                              {delta > 0 ? "+" : ""}{delta.toLocaleString("da-DK")}
+                                            </span>
+                                          )}
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                            <tfoot>
+                              <tr className="border-t border-white/10">
+                                <td className="sticky left-0 z-10 whitespace-nowrap bg-slate-950 px-2 py-2 text-left text-[0.6rem] font-semibold uppercase tracking-wider text-slate-500">
+                                  Samlet
+                                </td>
+                                {order.map((p) => {
+                                  const vals = estRounds.byPlayer[p.playerId] ?? [];
+                                  const diff = (vals.at(-1) ?? 0) - (vals[0] ?? 0);
+                                  return (
+                                    <td
+                                      key={p.playerId}
+                                      className={cn("whitespace-nowrap px-3 py-2 text-right font-bold tabular-nums", diff > 0 ? "text-emerald-400" : diff < 0 ? "text-red-400" : "text-slate-600")}
+                                    >
+                                      {diff > 0 ? "+" : ""}{diff.toLocaleString("da-DK")}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                        <p className="mt-3 text-center text-[0.65rem] text-slate-600">
+                          {estRounds.labels.length} runder · højeste estimat i hver runde er fremhævet
+                        </p>
+                      </>
+                    )}
                   </div>
                 );
               })()}

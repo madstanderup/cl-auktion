@@ -4,11 +4,9 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Check, Loader2, RefreshCw, Share2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { calcTeamPoints } from "@/lib/scoring";
-import { canBuildBracket, simulateBracket, buildStrengthMap } from "@/lib/bracket";
-import { simulateClTournament } from "@/lib/tournaments/cl-sim";
+import { buildRoundCheckpoints, estimatePlayerPointsPerRound } from "@/lib/est-rounds";
 import { colorByPlayerName } from "@/lib/player-colors";
-import { getTournament, getTournamentForGame, matchPointsForTournament, leagueQualBonusForTournament, calcPointsForTournament, type TournamentConfig } from "@/lib/tournaments";
+import { getTournament, getTournamentForGame, matchPointsForTournament, leagueQualBonusForTournament, type TournamentConfig } from "@/lib/tournaments";
 import { cn } from "@/lib/utils";
 
 type MatchRow = {
@@ -151,9 +149,10 @@ export default function PointsPage() {
     setRows(built);
     setLoading(false);
 
-    // ── Estimeret slutpoint pr. runde-checkpoint (retrospektiv bracket-sim) ──
+    // ── Estimeret slutpoint pr. runde-checkpoint (retrospektiv simulering) ──
     setEstDev(null);
-    if (canBuildBracket(matches)) {
+    const checkpoints = buildRoundCheckpoints(cfg, matches);
+    if (checkpoints.length >= 2) {
       // Kør async så tabellen renderes først
       setTimeout(() => {
         const gtRows = (gtRes.data ?? []) as Record<string, unknown>[];
@@ -169,106 +168,11 @@ export default function PointsPage() {
         const playerIds = [...ownedByPlayer.keys()];
         if (playerIds.length === 0) return;
 
-        const stageOrder = ["round_of_32", "round_of_16", "quarter_final", "semi_final", "final"];
-        const stageLabel: Record<string, string> = { round_of_32: "Efter 1/16", round_of_16: "Efter 1/8", quarter_final: "Efter 1/4", semi_final: "Efter 1/2", final: "Efter finalen" };
-        const checkpoints: { label: string; stages: string[] }[] = [{ label: "Efter grupper", stages: [] }];
-        for (let i = 0; i < stageOrder.length; i++) {
-          if (matches.some((m) => m.stage === stageOrder[i] && m.status === "finished")) {
-            checkpoints.push({ label: stageLabel[stageOrder[i]], stages: stageOrder.slice(0, i + 1) });
-          }
-        }
-        if (checkpoints.length < 2) return; // først interessant når knockout er i gang
-
-        const strength = buildStrengthMap();
-        const labels: string[] = [];
-        const values = new Map<string, number[]>(playerIds.map((p) => [p, []]));
-        for (const cp of checkpoints) {
-          const allowed = new Set(["group", ...cp.stages]);
-          const truncated = matches.filter((m) => allowed.has(m.stage));
-          const basePoints = new Map<string, number>();
-          for (const [pid, names] of ownedByPlayer) {
-            basePoints.set(pid, names.reduce((s, n) => s + calcTeamPoints(n, truncated), 0));
-          }
-          const res = simulateBracket(truncated, { playerIds, basePoints, strength, ownerByTeam, N: 4000 });
-          labels.push(cp.label);
-          for (const pid of playerIds) values.get(pid)!.push(Math.round(res.expectedPoints[pid] ?? 0));
-        }
+        const values = estimatePlayerPointsPerRound(cfg, checkpoints, { playerIds, ownedByPlayer, ownerByTeam });
         const series = playerIds
           .map((pid) => ({ name: playerNameById.get(pid) ?? "?", values: values.get(pid)! }))
           .sort((a, b) => (b.values.at(-1) ?? 0) - (a.values.at(-1) ?? 0));
-        setEstDev({ labels, series });
-      }, 0);
-    } else if (cfg.id === "cl2627") {
-      // CL: checkpoint efter hver spillet ligarunde + hver knockout-runde.
-      // Ved hvert checkpoint låses kampene til og med runden; senere kampe
-      // demoteres til "planlagt" (kampprogrammet kendes, resultatet ikke).
-      setTimeout(() => {
-        const gtRows = (gtRes.data ?? []) as Record<string, unknown>[];
-        const ownedByPlayer = new Map<string, string[]>(); // playerId → rå holdnavne
-        const ownerByTeam = new Map<string, string>();     // kanonisk (lower) → playerId
-        for (const gt of gtRows) {
-          const tn = teamNameById.get(String(gt.team_id));
-          const pid = gt.owner_player_id ? String(gt.owner_player_id) : null;
-          if (!tn || !pid) continue;
-          (ownedByPlayer.get(pid) ?? ownedByPlayer.set(pid, []).get(pid)!).push(tn);
-          ownerByTeam.set((cfg.findTeam(tn)?.name ?? tn).toLowerCase(), pid);
-        }
-        const playerIds = [...ownedByPlayer.keys()];
-        if (playerIds.length === 0) return;
-
-        // Runde-indeks pr. ligakamp: kampens placering i holdets daterede kampliste
-        const canonL = (n: string) => (cfg.findTeam(n)?.name ?? n).toLowerCase();
-        const leagueMs = matches
-          .filter((m) => m.stage === "league" && m.home_team !== "TBD" && m.away_team !== "TBD")
-          .sort((a, b) => (a.match_date ?? "").localeCompare(b.match_date ?? ""));
-        const perTeamIdx = new Map<string, number>();
-        const roundOf = new Map<MatchRow, number>(); // 0-baseret
-        for (const m of leagueMs) {
-          let r = 0;
-          for (const t of [canonL(m.home_team), canonL(m.away_team)]) {
-            const i = perTeamIdx.get(t) ?? 0;
-            r = Math.max(r, i);
-            perTeamIdx.set(t, i + 1);
-          }
-          roundOf.set(m, r);
-        }
-
-        const asScheduled = (m: MatchRow): MatchRow =>
-          ({ ...m, home_score: null, away_score: null, result_type: null, winner_side: null, status: "scheduled" });
-        const leagueTrunc = (k: number) => // runde < k beholdes som spillet; resten planlagt; knockout droppes
-          leagueMs.map((m) => (m.status === "finished" && (roundOf.get(m) ?? 0) < k ? m : asScheduled(m)));
-
-        const koOrder = ["playoff", "round_of_16", "quarter_final", "semi_final", "final"];
-        const koLabel: Record<string, string> = { playoff: "Efter playoff", round_of_16: "Efter 1/8", quarter_final: "Efter 1/4", semi_final: "Efter 1/2", final: "Efter finalen" };
-        const checkpoints: { label: string; truncated: MatchRow[] }[] = [{ label: "Start", truncated: leagueTrunc(0) }];
-        for (let k = 1; k <= cfg.leagueRounds; k++) {
-          if (leagueMs.some((m) => m.status === "finished" && (roundOf.get(m) ?? 0) === k - 1)) {
-            checkpoints.push({ label: `Efter ${k}. runde`, truncated: leagueTrunc(k) });
-          }
-        }
-        for (let i = 0; i < koOrder.length; i++) {
-          if (matches.some((m) => m.stage === koOrder[i] && m.status === "finished")) {
-            const allowed = new Set(["league", ...koOrder.slice(0, i + 1)]);
-            checkpoints.push({ label: koLabel[koOrder[i]], truncated: matches.filter((m) => allowed.has(m.stage)) });
-          }
-        }
-        if (checkpoints.length < 2) return; // først interessant når der er spillet kampe
-
-        const labels: string[] = [];
-        const values = new Map<string, number[]>(playerIds.map((p) => [p, []]));
-        for (const cp of checkpoints) {
-          const basePoints = new Map<string, number>();
-          for (const [pid, names] of ownedByPlayer) {
-            basePoints.set(pid, names.reduce((s, n) => s + calcPointsForTournament(cfg, n, cp.truncated), 0));
-          }
-          const res = simulateClTournament(cp.truncated, { playerIds, basePoints, ownerByTeam, N: 3000 });
-          labels.push(cp.label);
-          for (const pid of playerIds) values.get(pid)!.push(Math.round(res.expectedPoints[pid] ?? 0));
-        }
-        const series = playerIds
-          .map((pid) => ({ name: playerNameById.get(pid) ?? "?", values: values.get(pid)! }))
-          .sort((a, b) => (b.values.at(-1) ?? 0) - (a.values.at(-1) ?? 0));
-        setEstDev({ labels, series });
+        setEstDev({ labels: checkpoints.map((c) => c.longLabel), series });
       }, 0);
     }
   }

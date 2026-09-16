@@ -22,6 +22,24 @@ const REGISTRY: Record<string, TournamentConfig> = {
  */
 export const CURRENT_TOURNAMENT: TournamentConfig = CL2627;
 
+/** Resultatkilde → endpoint. "none" betyder at kilden er pensioneret. */
+const SYNC_ENDPOINTS: Record<TournamentConfig["syncSource"], string | null> = {
+  "zafronix-wc2026": "/api/sync-matches",
+  "uefa-cl2627": "/api/sync-matches-cl",
+  none: null,
+};
+
+/**
+ * Turneringer med en levende resultatkilde — præcis dem superadmin-syncen skal
+ * ramme. Hver kilde skriver kun i sin egen turnerings spil; kalder man en
+ * pensioneret kilde, henter den kampe fra en turnering ingen spiller længere.
+ */
+export function activeSyncTargets(): { label: string; url: string }[] {
+  return Object.values(REGISTRY)
+    .map((t) => ({ label: t.label, url: SYNC_ENDPOINTS[t.syncSource] }))
+    .filter((t): t is { label: string; url: string } => t.url !== null);
+}
+
 /** Turneringer der kan vælges ved spiloprettelse — den aktuelle først. */
 export const AVAILABLE_TOURNAMENTS: { id: TournamentId; label: string; available: boolean }[] = [
   CL2627,

@@ -33,5 +33,9 @@ export const WC2026: TournamentConfig = {
   leagueRounds: 3,
   hasBracket: true,
   twoLeggedKnockout: false,
-  syncSource: "zafronix-wc2026",
+  // Turneringen er spillet færdig (finalen 19. juli 2026), og Zafronix
+  // blokerer Vercels IP'er. Kilden er derfor pensioneret: intet cron og ingen
+  // knap rammer /api/sync-matches længere. Sæt den tilbage til
+  // "zafronix-wc2026", hvis VM-kampene nogensinde skal hentes igen.
+  syncSource: "none",
 };

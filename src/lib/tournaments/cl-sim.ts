@@ -74,7 +74,19 @@ type Runner = {
   runIteration: (simPts: Float64Array) => void;
 };
 
-function buildRunner(matches: ScoreMatch[], extraNames: string[]): Runner {
+/**
+ * Hører kampen til CL? Alle turneringer deler wc_matches OG stage-navne
+ * ("round_of_16", "final", ...), så en kamp fra en anden turnering, der ender i
+ * et CL-spil, ville blive læst som et CL-opgør og låse hele knockout-træet.
+ * Mindst ét hold skal findes i CL-katalogen — ét ukendt navn (stavefejl,
+ * manglende alias) må ikke smide kampen væk.
+ */
+function isClMatch(m: ScoreMatch): boolean {
+  return findCL2627Team(m.home_team) !== undefined || findCL2627Team(m.away_team) !== undefined;
+}
+
+function buildRunner(allMatches: ScoreMatch[], extraNames: string[]): Runner {
+  const matches = allMatches.filter(isClMatch);
   const canon = (n: string) => (findCL2627Team(n)?.name ?? n).toLowerCase();
 
   // ── Holdindeks (kanoniske navne, lowercase) ──────────────────────────

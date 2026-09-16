@@ -154,6 +154,13 @@ async function runSync(_req: Request) {
   {
     const res = await supabase.from("games").select("id").eq("tournament_type", "wc2026");
     if (res.error) {
+      // Fallback'en findes KUN til databaser hvor tournament_type-kolonnen
+      // endnu ikke er migreret ind (Postgres 42703). Enhver anden fejl —
+      // timeout, RLS, netværk — må ikke ende med at skrive VM-kampe ind i
+      // ALLE spil, inkl. CL-spillene, hvor de låser knockout-simuleringen.
+      if (res.error.code !== "42703") {
+        return NextResponse.json({ error: res.error.message }, { status: 500 });
+      }
       const fallback = await supabase.from("games").select("id");
       if (fallback.error) return NextResponse.json({ error: fallback.error.message }, { status: 500 });
       games = fallback.data as { id: string }[];

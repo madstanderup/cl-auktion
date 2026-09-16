@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2, RefreshCw, ShieldCheck, Trash2, KeyRound, Gamepad2, Users, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
+import { activeSyncTargets } from "@/lib/tournaments";
 
 type UserRow = {
   id: string;
@@ -200,14 +201,17 @@ export default function SuperAdminPage() {
     setActionLoading("sync-matches");
     setMessage(null);
     try {
-      // Hver turnering har sin egen kilde: VM 2026 henter fra Zafronix,
-      // CL 26/27 fra UEFA. Knappen skal ramme dem begge — ellers står
-      // CL-stillingen stille, selv om syncen melder "ok".
+      // Hver turnering har sin egen kilde, og listen kommer fra turnerings-
+      // konfigurationen (syncSource). Så snart en turnering er spillet færdig
+      // og kilden sættes til "none", falder den af knappen af sig selv — i
+      // stedet for at blive ved med at hente en afsluttet turnerings kampe.
+      const targets = activeSyncTargets();
+      if (targets.length === 0) {
+        setMessage("Ingen turneringer har en aktiv resultatkilde.");
+        return;
+      }
       const results = await Promise.all(
-        ([
-          ["VM 2026", "/api/sync-matches"],
-          ["CL 26/27", "/api/sync-matches-cl"],
-        ] as const).map(async ([label, url]) => {
+        targets.map(async ({ label, url }) => {
           try {
             const res = await fetch(url, { method: "POST" });
             const text = await res.text();
@@ -293,7 +297,7 @@ export default function SuperAdminPage() {
           </div>
           <div className="flex items-center justify-between gap-4 px-4 py-4">
             <p className="text-xs text-slate-400">
-              Henter kampe (planlagte + afsluttede) for både VM 2026 (Zafronix) og CL 26/27 (UEFA), gemmer dem i databasen og genberegner point.
+              Henter kampe (planlagte + afsluttede) for {activeSyncTargets().map((t) => t.label).join(", ") || "ingen turneringer"}, gemmer dem i databasen og genberegner point.
             </p>
             <Button
               type="button"

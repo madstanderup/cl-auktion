@@ -1,12 +1,18 @@
-name: Sync WC Match Results
+name: Sync CL Match Results
 
 on:
   schedule:
-    # 30 min after matches ending on the hour (UTC)
-    - cron: "10 0,1,2,3,4,5,6,18,19,20,21,22,23 * * *"
-    # 30 min after matches ending at :30 (UTC)
-    - cron: "40 1,2,3,4,22 * * *"
-    # Daily at 08:00 Danish time (= 06:00 UTC during CEST)
+    # CL spilles tirsdag/onsdag med afspark 16:45-17:45 og 19:00-20:00 UTC.
+    # Kampene er slut 18:45-22:15 (senere ved forlaenget spilletid), saa vi
+    # synkroniserer hver halve time i det vindue.
+    - cron: "0,30 18-22 * * 2,3"
+    - cron: "0 23 * * 2,3"
+    # Finalen spilles en loerdag aften.
+    - cron: "0,30 20-22 * * 6"
+    # Daglig opsamling kl. 08:00 dansk tid (= 06:00 UTC under CEST).
+    # Vercel-cron koerer den samme sync 06:30 UTC (vercel.json). Overlappet er
+    # med vilje: GitHub slaar planlagte workflows fra efter 60 dage uden
+    # aktivitet i repoet, og syncen er idempotent, saa to koersler skader intet.
     - cron: "0 6 * * *"
   # Allow manual trigger from GitHub Actions tab
   workflow_dispatch:
@@ -18,9 +24,9 @@ jobs:
       - name: Trigger match sync
         run: |
           response=$(curl -s -w "\n%{http_code}" -X GET \
-            "https://cl-auktion.vercel.app/api/sync-matches")
-          body=$(echo "$response" | head -1)
+            "https://cl-auktion.vercel.app/api/sync-matches-cl")
           status=$(echo "$response" | tail -1)
+          body=$(echo "$response" | sed '$d')
           echo "Status: $status"
           echo "Response: $body"
           if [ "$status" != "200" ]; then

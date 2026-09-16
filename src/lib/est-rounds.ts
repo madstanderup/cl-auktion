@@ -67,7 +67,12 @@ function bracketCheckpoints(matches: DatedMatch[]): RoundCheckpoint[] {
  * Ligarunden udledes af kampens plads i holdets daterede kampliste — der er
  * ingen rundekolonne i databasen.
  */
-function clCheckpoints(cfg: TournamentConfig, matches: DatedMatch[]): RoundCheckpoint[] {
+function clCheckpoints(cfg: TournamentConfig, allMatches: DatedMatch[]): RoundCheckpoint[] {
+  // Stage-navnene ("final", "round_of_16", ...) deles med de andre turneringer i
+  // den fælles kamptabel. En fremmed kamp i spillet ville derfor give et
+  // checkpoint for en runde der aldrig er spillet — mindst ét hold skal findes
+  // i turneringens katalog, før kampen tæller med.
+  const matches = allMatches.filter((m) => cfg.findTeam(m.home_team) || cfg.findTeam(m.away_team));
   const canon = (n: string) => (cfg.findTeam(n)?.name ?? n).toLowerCase();
   const leagueMs = matches
     .filter((m) => m.stage === "league" && m.home_team !== "TBD" && m.away_team !== "TBD")
